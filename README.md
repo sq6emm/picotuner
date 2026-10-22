@@ -11,3 +11,5 @@ source (GPL v3, see Upstream below).
 - `firmware/` — own build of G4EWJ's 0v3e source (GPL v3): DHCP option 54, AGC/power/LNA in the
   status, firmware update over Ethernet (`ptboot` bootloader). See `docs/firmware.md`;
   `tools/ptupdate.py` uploads, `tools/uf2pack.py` packs UF2s, `firmware/test/run.sh` tests.
+- `tools/whlog.py` — tune a receiver and log its status (AGC, MER, errors) to CSV, or sweep AGC
+  over frequency. Plan for the first test in the tuner: `docs/agc-test.md`.
