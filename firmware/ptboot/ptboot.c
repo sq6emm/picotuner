@@ -185,6 +185,9 @@ int main (void)
 	if (pt_image_vectors_valid ((const uint8_t *) PT_APP_BASE, PT_APP_MAX))
 	{
 		blink (2, 150) ;											// jumping to the app
+#ifdef PTBOOT_START_DELAY_MS
+		busy_wait_ms (PTBOOT_START_DELAY_MS) ;						// bring-up experiment: cold start timing
+#endif
 		start_application() ;
 	}
 

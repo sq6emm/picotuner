@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota1"	// sub version ID: 0v3e + DHCP option 54, AGC status, update over Ethernet
+#define VERSIONX2	"e-ota2"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet
 
 #define CR		13
 #define LF		10
@@ -5103,6 +5103,113 @@ static	uint32			counter ;
             	    sprintf (rcv[rx].textinfos[y], "%.3f" ,((float)temp) / 1000) ;   			// frequency in MHz    
                 }
                 
+// demodulator quality figures (LongMynd numbering); fields that do not apply to the state are cleared
+
+                {
+                	uint8	sym_i ;
+                	uint8	sym_q ;
+                	uint32	value ;
+                	bool	uncorrected ;
+                	bool	locked_s  = rcv[rx].scanstate == STATE_DEMOD_S ;
+                	bool	locked_s2 = rcv[rx].scanstate == STATE_DEMOD_S2 ;
+                	static const uint8 s_fields  [] = {STATUS_PUNCTURE_RATE, STATUS_VITERBI_ERROR_RATE} ;
+                	static const uint8 s2_fields [] = {STATUS_ERRORS_LDPC_COUNT, STATUS_ERRORS_BCH_COUNT,
+                									   STATUS_ERRORS_BCH_UNCORRECTED, STATUS_MULTISTREAM0, STATUS_MULTISTREAM1} ;
+
+					for (z = 0 ; z < sizeof(s_fields) && !locked_s ; z++)
+					{
+						rcv[rx].textinfos[s_fields[z]][0] = 0 ;
+					}
+					for (z = 0 ; z < sizeof(s2_fields) && !locked_s2 ; z++)
+					{
+						rcv[rx].textinfos[s2_fields[z]][0] = 0 ;
+					}
+					if (!locked_s && !locked_s2)
+					{
+						rcv[rx].textinfos[STATUS_BER][0] = 0 ;
+					}
+
+					if (stv0910_read_constellation (rcv[rx].nimreceiver, &sym_i, &sym_q) == ERROR_NONE)
+					{
+						rcv[rx].rawinfos[STATUS_CONSTELLATION_I] = (int8_t) sym_i ;				// parameter 7, one symbol
+						sprintf (rcv[rx].textinfos[STATUS_CONSTELLATION_I], "%d", (int8_t) sym_i) ;
+						rcv[rx].rawinfos[STATUS_CONSTELLATION_Q] = (int8_t) sym_q ;				// parameter 8
+						sprintf (rcv[rx].textinfos[STATUS_CONSTELLATION_Q], "%d", (int8_t) sym_q) ;
+					}
+
+					y = STATUS_DEBUG0 ;															// parameter 28: TSSTATUS2:TSSTATUS
+					if (stv0910_read_debug0 (rcv[rx].nimreceiver, &value) == ERROR_NONE)
+					{
+						rcv[rx].rawinfos[y] = value ;
+						sprintf (rcv[rx].textinfos[y], "%d", value) ;
+					}
+
+					if (locked_s || locked_s2)
+					{
+						y = STATUS_BER ;														// parameter 11
+						if (stv0910_read_ber (rcv[rx].nimreceiver, &value) == ERROR_NONE)
+						{
+							rcv[rx].rawinfos[y] = value ;
+							sprintf (rcv[rx].textinfos[y], "%d", value) ;
+						}
+					}
+
+					if (locked_s)
+					{
+						y = STATUS_PUNCTURE_RATE ;												// parameter 3: n for FEC n/(n+1)
+						if (stv0910_read_puncture_rate (rcv[rx].nimreceiver, &tempc) == ERROR_NONE)
+						{
+							rcv[rx].rawinfos[y] = tempc ;
+							sprintf (rcv[rx].textinfos[y], "%d", tempc) ;
+						}
+
+						y = STATUS_VITERBI_ERROR_RATE ;											// parameter 10: % x 100
+						if (stv0910_read_err_rate (rcv[rx].nimreceiver, &value) == ERROR_NONE)
+						{
+							rcv[rx].rawinfos[y] = value ;
+							sprintf (rcv[rx].textinfos[y], "%d", value) ;
+						}
+					}
+
+					if (locked_s2)
+					{
+						y = STATUS_ERRORS_LDPC_COUNT ;											// parameter 21 (chip total)
+						if (stv0910_read_errors_ldpc_count (rcv[rx].nimreceiver, &value) == ERROR_NONE)
+						{
+							rcv[rx].rawinfos[y] = value ;
+							sprintf (rcv[rx].textinfos[y], "%d", value) ;
+						}
+
+						y = STATUS_ERRORS_BCH_COUNT ;											// parameter 22 (chip total)
+						if (stv0910_read_errors_bch_count (rcv[rx].nimreceiver, &value) == ERROR_NONE)
+						{
+							rcv[rx].rawinfos[y] = value ;
+							sprintf (rcv[rx].textinfos[y], "%d", value) ;
+						}
+
+						y = STATUS_ERRORS_BCH_UNCORRECTED ;										// parameter 23: 1 = uncorrected errors
+						if (stv0910_read_errors_bch_uncorrected (rcv[rx].nimreceiver, &uncorrected) == ERROR_NONE)
+						{
+							rcv[rx].rawinfos[y] = uncorrected ;
+							sprintf (rcv[rx].textinfos[y], "%d", uncorrected) ;
+						}
+
+						y = STATUS_MULTISTREAM0 ;												// parameter 26
+						if (stv0910_read_multistream0 (rcv[rx].nimreceiver, &value) == ERROR_NONE)
+						{
+							rcv[rx].rawinfos[y] = value ;
+							sprintf (rcv[rx].textinfos[y], "%d", value) ;
+						}
+
+						y = STATUS_MULTISTREAM1 ;												// parameter 27
+						if (stv0910_read_multistream1 (rcv[rx].nimreceiver, &value) == ERROR_NONE)
+						{
+							rcv[rx].rawinfos[y] = value ;
+							sprintf (rcv[rx].textinfos[y], "%d", value) ;
+						}
+					}
+                }
+
 // put info into VLC header bar
 
 				setup_titlebar (titlebar, rx) ;										// create the VLC title bar

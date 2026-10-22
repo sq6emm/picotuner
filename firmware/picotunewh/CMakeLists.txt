@@ -22,6 +22,10 @@ if(DEFINED PTUP_KEY)
 	target_compile_definitions(${TARGET_NAME} PRIVATE PTUP_KEY="${PTUP_KEY}")
 endif()
 
+# The W5100S-EVB-Pico tested here only starts from power-on with a longer crystal start-up
+# (with 1, G4EWJ's own 0v3e stays dark too; warm resets always worked)
+target_compile_definitions(${TARGET_NAME} PRIVATE PICO_XOSC_STARTUP_DELAY_MULTIPLIER=64)
+
 pico_set_linker_script(${TARGET_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/memmap_custom-2MB.ld)
 
 pico_generate_pio_header(${TARGET_NAME} ${CMAKE_CURRENT_LIST_DIR}/${TARGET_NAME}.pio)

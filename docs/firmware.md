@@ -1,4 +1,4 @@
-# PicoTuneWH 0v3e-ota1 (own build)
+# PicoTuneWH 0v3e-ota2 (own build)
 
 G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picotunewh/`, plus:
 
@@ -9,9 +9,15 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
    `$35` AGC1 (STV0910 `AGCIQIN1:0`, LongMynd `$26`), `$36` AGC2 (`AGC2I1:0`, LongMynd `$27`),
    `$4`/`$5` POWER I/Q, `$2` LNA gain `(gain<<5)|vgo` (NIMs with the STVVGLNA only).
    26/27 are G4EWJ's multistream numbers, hence 35/36.
+   Also from the demodulator, in G4EWJ's/LongMynd's numbering (defined in `main.h`, never filled
+   before): `$7`/`$8` one constellation symbol I/Q (signed), `$28` TSSTATUS2:TSSTATUS (TS FIFO);
+   when locked `$11` BER; DVB-S only `$3` puncture (n of FEC n/(n+1)), `$10` Viterbi error rate
+   (% x 100); DVB-S2 only `$21` LDPC and `$22` BCH error counts, `$23` uncorrected flag (these
+   three are chip totals, not per demodulator), `$26`/`$27` multistream (MATSTR/PDELCTRL,
+   ISIENTRY/ISIBITENA). Fields that do not apply to the current state are left empty.
 3. **Update over Ethernet** with the `ptboot` bootloader (`firmware/ptboot/`, layout in
    `firmware/common/ptupdate.h`), on the command port, no extra socket.
-4. Version `ptwh0v3e-ota1-w5100s.uf2`.
+4. Version `ptwh0v3e-ota2-w5100s.uf2`.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):
@@ -49,13 +55,23 @@ model at 0x10000000: install, rollback, a power cut at every flash operation (11
   with only the last 1 KiB of every app sector written (once), and one block missing (the next
   time). `uf2pack.py` now fills the gap; that image read back identical. Check with
   `picotool save` + compare, or install with `picotool load -v`.
-- Same set on a bare W5500-EVB-Pico (`WIZNET_CHIP=W5500` build, ptwh0v3e-ota1-w5500): DHCP,
+- Same set on a bare W5500-EVB-Pico (`WIZNET_CHIP=W5500` build, ptwh0v3e-ota2-w5500): DHCP,
   ota1 → rbtest → ota1 with confirmation, rollback after 3 trial boots, `bootsel=369` over the
   network. Its WIZnet loopback demo is saved in `fw/testboard/w5500/w5500-before.bin`.
 - Upload speed: 82–84 KiB/s from `power` (wired), 60–75 KiB/s from the notebook on Wi-Fi with
   two slow runs (2 and 7 KiB/s, few resends; never seen on the wired host). Outside a session the
   command port is polled every 250 ms as in the original, so a lone INFO takes ~250 ms.
-- Not covered without a NIM: the `$2/$4/$5/$35/$36` values, I2C under the Core1 lockout, TS.
+- Not covered without a NIM: the `$2/$3/$4/$5/$7/$8/$10/$11/$21-23/$26-28/$35/$36` values, I2C under the Core1 lockout, TS.
+
+## Cold start: crystal start-up (found on the test W5100S-EVB-Pico)
+After a power-on the test board stayed dark (no USB, no LED) with every SDK 1.4.0 build at the
+default `PICO_XOSC_STARTUP_DELAY_MULTIPLIER=1`: ptboot + app, the app without ptboot, a 2.5 s
+delay in ptboot, and G4EWJ's own `ptwh0v3e-w5100s.uf2`. Warm resets (picotool, `reboot=258`,
+updates) always worked. With the multiplier at 64 (about 64 ms instead of 1 ms of XOSC start-up)
+it started 3 times out of 3. Both CMake projects now set it; it costs ~60 ms at boot.
+Bring-up options in `tools/build/build.sh`: `PTBOOT_DEBUG_LED=1` (ptboot blinks GP25: 1 long =
+running, 2 short = starting the app, 5 fast = no app, BOOTSEL), `PTBOOT_START_DELAY_MS=n`,
+`STANDALONE=1` (app at 0x10000000 without ptboot), `XOSC_MULT=n`, `VERSION_TAG=x`.
 
 ## Limits / risks
 - Still to try on the real tuner: AGC/power/LNA values, Core1 lockout while it waits on I2C,
