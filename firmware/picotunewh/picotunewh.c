@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e"			// sub version ID
+#define VERSIONX2	"e-ota1"	// sub version ID: 0v3e + DHCP option 54, AGC status, update over Ethernet
 
 #define CR		13
 #define LF		10
@@ -88,6 +88,7 @@
 #include "hardware/vreg.h"
 #include "hardware/watchdog.h"
 #include "pico/bootrom.h"
+#include "ota.h"
 
 /*
     Default operation for baseipport = 9900 
@@ -549,6 +550,7 @@ struct dhcp_discover	dhcpdisc =
 						} ;
 
 struct dhcp_discover	dhcpoffer ;
+uint8					dhcp_server_id [4] ;							// option 54 from the OFFER, echoed in the REQUEST
 
 struct dhcp_discover	dhcprequest =
 						{
@@ -1839,6 +1841,11 @@ void mainloop()
 
 		inicommand_loop() ;													// send ini commands one by one
 		status = dhcp_scheduler (4) ;
+		ota_poll (dhcp_success) ;											// update session timeout, confirm new firmware
+		if (ota_reboot_wanted() && reboot_request == 0)
+		{
+			reboot_request = 2 ;											// ptboot installs the staged image
+		}
 		
 		if (freechainempty > 1)
 		{
@@ -2001,7 +2008,7 @@ void mainloop()
 	
 // check for Ethernet commands received and place into buffer for core 1        
 
-		if (tur01e.status != 1 && monotime_ms() - lastcommandcheck_ms >= 250)
+		if (tur01e.status != 1 && (ota_active() || monotime_ms() - lastcommandcheck_ms >= 250))
 		{
 			lastcommandcheck_ms = monotime_ms() ;
 			for (rx = 0 ; rx <= MAXRECEIVERS ; rx++)
@@ -2015,6 +2022,12 @@ void mainloop()
 					(void*) &(tur01e.address), 
 					(void*) &tur01e.port
 				) ;
+
+				if (status > 0 && rx == 0 && ota_is_packet ((uint8*) &tur01e.buffer, status))
+				{
+					ota_handle (rcv[rx].socket, (uint8*) &tur01e.buffer, status, (uint8*) &tur01e.address, tur01e.port) ;
+					continue ;												// update packets never reach Core1
+				}
 
 				if (status > 0)
 				{
@@ -3539,13 +3552,15 @@ int dhcp_waiting_offer_state_2 (int command)
 		)
 		{
 			memcpy (netinfo.rx, received_address, 4) ;			// the address making the offer
+			memcpy (dhcp_server_id, received_address, 4) ;		// server identifier if the OFFER has no option 54
 			memset (temps, 0, sizeof(temps)) ;
-						
+
 			p = dhcpoffer.options ;
 			while (*p != 255 && (int) p < (int) &dhcpoffer.end_packet)
 			{
 				switch (p[0])
 				{
+					case DHCP_MESSAGE_SERVER: if (p[1] == 4) memcpy (dhcp_server_id, p+2, 4) ; break ;
 					default: break ;
 				} ;
 				p += p[1] + 2 ;
@@ -3615,7 +3630,12 @@ int dhcp_sending_request_state_7 (int command)
 	*p++ = DHCP_MESSAGE_REQUESTEDIP ;
 	*p++ = 4 ;								// length
 	memcpy (p, dhcpoffer.your_ip, 4) ;		// offered ip address
-	p += 4 ;		
+	p += 4 ;
+
+	*p++ = DHCP_MESSAGE_SERVER ;			// RFC 2131: required in the REQUEST that answers an OFFER
+	*p++ = 4 ;								// length
+	memcpy (p, dhcp_server_id, 4) ;			// server identifier from the OFFER
+	p += 4 ;
 
 	*p++ = DHCP_MESSAGE_HOSTNAME ;
 	*p++ = sizeof (dhcprequest.host_name) ;								// length
@@ -4050,6 +4070,7 @@ void core1_main()
 	uint32			vgysel_ ;				// voltage generator Y low / high select	
 	char			vgystring_ [8] ;
 
+	ota_core1_ready() ;							// let Core0 pause this core while it writes flash
 	thenms = monotime_ms() ;
 
 	while (1)
@@ -4702,7 +4723,7 @@ int __in_flash("my_group_name") info_loop ()
 		uint32			y ;
 		uint32			z ;
 		char			titlebar [256] ;
-		char			temps    [512] ;
+static	char			temps    [PPB*TSPACKETSIZE] ;							// holds a whole $n,value set; static: Core1's stack is small
 		char			temps2   [256] ;
 		char			temps3   [256] ;
 		bool			bool1 ;
@@ -4931,7 +4952,49 @@ static	uint32			counter ;
                 {
 					temp = -999 ;
                 }
-                sprintf (rcv[rx].textinfos[y], "%.1f" ,((float) temp) / 10) ;		// MER  
+                sprintf (rcv[rx].textinfos[y], "%.1f" ,((float) temp) / 10) ;		// MER
+
+// signal levels: read every cycle, with or without a lock
+
+                {
+                	uint16	agc ;
+                	uint8	power_i ;
+                	uint8	power_q ;
+                	uint8	lna_gain ;
+                	uint8	lna_vgo ;
+
+	                y = STATUS_AGC1_GAIN ;                                          // parameter 35
+					if (stv0910_read_agc1_gain (rcv[rx].nimreceiver, &agc) == ERROR_NONE)
+					{
+		                rcv[rx].rawinfos[y] = agc ;
+		                sprintf (rcv[rx].textinfos[y], "%d", agc) ;
+					}
+
+	                y = STATUS_AGC2_GAIN ;                                          // parameter 36
+					if (stv0910_read_agc2_gain (rcv[rx].nimreceiver, &agc) == ERROR_NONE)
+					{
+		                rcv[rx].rawinfos[y] = agc ;
+		                sprintf (rcv[rx].textinfos[y], "%d", agc) ;
+					}
+
+					if (stv0910_read_power (rcv[rx].nimreceiver, &power_i, &power_q) == ERROR_NONE)
+					{
+		                rcv[rx].rawinfos[STATUS_POWER_I] = power_i ;                // parameter 4
+		                sprintf (rcv[rx].textinfos[STATUS_POWER_I], "%d", power_i) ;
+		                rcv[rx].rawinfos[STATUS_POWER_Q] = power_q ;                // parameter 5
+		                sprintf (rcv[rx].textinfos[STATUS_POWER_Q], "%d", power_q) ;
+					}
+
+					if (rcv[rx].xlnaexists)
+					{
+		                y = STATUS_LNA_GAIN ;                                       // parameter 2, LongMynd format
+						if (stvvglna_read_agc (rcv[rx].antenna == 2 ? NIM_INPUT_BOTTOM : NIM_INPUT_TOP, &lna_gain, &lna_vgo) == ERROR_NONE)
+						{
+			                rcv[rx].rawinfos[y] = (lna_gain << 5) | lna_vgo ;
+			                sprintf (rcv[rx].textinfos[y], "%d", rcv[rx].rawinfos[y]) ;
+						}
+					}
+                }
 
            	    if (rcv[rx].scanstate == STATE_HEADER_S2 || rcv[rx].scanstate == STATE_DEMOD_S2) // DVB-S2 header or lock
                 {                    

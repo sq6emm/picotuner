@@ -14,7 +14,13 @@ add_executable(${TARGET_NAME}
 		stv6120_utils.c
 		stvvglna.c
 		stvvglna_utils.c    
+		ota.c
         )
+
+# key for updates over Ethernet: cmake -DPTUP_KEY=...
+if(DEFINED PTUP_KEY)
+	target_compile_definitions(${TARGET_NAME} PRIVATE PTUP_KEY="${PTUP_KEY}")
+endif()
 
 pico_set_linker_script(${TARGET_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/memmap_custom-2MB.ld)
 

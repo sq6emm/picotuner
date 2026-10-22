@@ -524,6 +524,64 @@ uint8_t stv0910_read_power (uint8_t tunerdemod, uint8_t *power_i, uint8_t *power
 }
 
 /* -------------------------------------------------------------------------------------------------- */
+/* reads the AGC1 (IF level) gain registers, as in LongMynd; valid with or without a lock             */
+/*  demod: STV_TUNER1_DEMOD2 | STV_TUNER2_DEMOD1: which demodulator is being read                    */
+/*    agc: place to store the 16 bit result                                                           */
+/* return: error state                                                                                */
+/* -------------------------------------------------------------------------------------------------- */
+
+uint8_t stv0910_read_agc1_gain (uint8_t tunerdemod, uint16_t *agc)
+{
+    uint8_t 	err ;
+    uint8_t 	agc_low, agc_high ;
+
+	err = stv0910_read_reg (tunerdemod == STV_TUNER1_DEMOD2 ? RSTV0910_P2_AGCIQIN0 : RSTV0910_P1_AGCIQIN0, &agc_low) ;
+
+	if (err == ERROR_NONE)
+	{
+		err = stv0910_read_reg (tunerdemod == STV_TUNER1_DEMOD2 ? RSTV0910_P2_AGCIQIN1 : RSTV0910_P1_AGCIQIN1, &agc_high) ;
+	}
+
+	if (err == ERROR_NONE)
+	{
+		*agc = (uint16_t) agc_high << 8 | (uint16_t) agc_low ;
+	}
+
+    if (err != ERROR_NONE) lmprint ("ERROR: STV0910 read agc1 gain\r\n");
+
+    return (err) ;
+}
+
+/* -------------------------------------------------------------------------------------------------- */
+/* reads the AGC2 (symbol level) gain registers, as in LongMynd                                       */
+/*  demod: STV_TUNER1_DEMOD2 | STV_TUNER2_DEMOD1: which demodulator is being read                    */
+/*    agc: place to store the 16 bit result                                                           */
+/* return: error state                                                                                */
+/* -------------------------------------------------------------------------------------------------- */
+
+uint8_t stv0910_read_agc2_gain (uint8_t tunerdemod, uint16_t *agc)
+{
+    uint8_t 	err ;
+    uint8_t 	agc_low, agc_high ;
+
+	err = stv0910_read_reg (tunerdemod == STV_TUNER1_DEMOD2 ? RSTV0910_P2_AGC2I0 : RSTV0910_P1_AGC2I0, &agc_low) ;
+
+	if (err == ERROR_NONE)
+	{
+		err = stv0910_read_reg (tunerdemod == STV_TUNER1_DEMOD2 ? RSTV0910_P2_AGC2I1 : RSTV0910_P1_AGC2I1, &agc_high) ;
+	}
+
+	if (err == ERROR_NONE)
+	{
+		*agc = (uint16_t) agc_high << 8 | (uint16_t) agc_low ;
+	}
+
+    if (err != ERROR_NONE) lmprint ("ERROR: STV0910 read agc2 gain\r\n");
+
+    return (err) ;
+}
+
+/* -------------------------------------------------------------------------------------------------- */
 /* reads the viterbi error rate registers                                                             */
 /*    demod: STV_TUNER1_DEMOD2 | STV0910_DEMOD_BOTTOM: which demodulator is being read                */
 /* vit_errs: place to store the result                                                                */

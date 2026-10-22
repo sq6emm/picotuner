@@ -23,7 +23,7 @@
 
 MEMORY
 {
-    FLASH(rx) 		: ORIGIN = 0x10000000, LENGTH = 2016k
+    FLASH(rx) 		: ORIGIN = 0x10008000, LENGTH = 480k		/* app slot after ptboot, see common/ptupdate.h */
     FLASH0(rx) 		: ORIGIN = 0x101ff000, LENGTH = 4k
     FLASH1(rx) 		: ORIGIN = 0x101fe000, LENGTH = 4k
     FLASH2(rx) 		: ORIGIN = 0x101fd000, LENGTH = 4k

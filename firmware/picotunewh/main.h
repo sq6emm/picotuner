@@ -79,7 +79,9 @@
 #define STATUS_VIDEO_TYPE		  31		// 0x02=MPEG2, 0x1b=H264, 0x24=H265	
 #define STATUS_ROLLOFF			  32		// 0,1,2,3 = 0.35,0.25,0.20,0.15	
 #define STATUS_ANTENNA			  33		// 1:2 = TOP:BOT
-#define STATUS_AUDIO_TYPE		  34		// 0x03=MP2, 0x0f=AAC	
+#define STATUS_AUDIO_TYPE		  34		// 0x03=MP2, 0x0f=AAC
+#define STATUS_AGC1_GAIN		  35		// STV0910 AGCIQIN1:AGCIQIN0 (LongMynd $26), valid without a lock
+#define STATUS_AGC2_GAIN		  36		// STV0910 AGC2I1:AGC2I0 (LongMynd $27)
 
 #define STATUS_VGX_STATE		  86		// voltage generator state
 #define STATUS_VGY_STATE		  87		// voltage generator state
