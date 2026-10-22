@@ -4,7 +4,9 @@ Goal: check that the new status fields (`$35` AGC1, `$36` AGC2, `$4/$5` power, `
 LDPC/BCH, constellation, TS status) give sensible values with the FTS-4334L NIM, with and without
 a lock, and that reading them does not hurt reception. No dish movement.
 
-Module: the test W5100S-EVB-Pico (ptboot + `ptwh0v3e-ota2-w5100s.uf2`, update key `picotuner`).
+Module: the test W5500-EVB-Pico (ptboot + `ptwh0v3e-ota2-w5500.uf2`, update key `picotuner`). Chosen
+over the W5100S board because its crystal starts reliably without the longer XOSC start-up (the
+module sits outdoors at the dish), and it has 8 sockets for later features.
 The original module (G4EWJ 0v3g) is the way back: swap it in again.
 
 ## Before the day
@@ -40,7 +42,7 @@ the receiver over: status and TS go to the machine running it. Re-send your own 
 6. **Stability**: step 1 for 10 minutes (`--duration 600`), in VLC too if wanted (`--no-ts`, VLC on
    `udp://@:9941`). Expect no gaps in the status, MER as in step 1, steady TS rate.
 7. **Update while receiving**: keep step 6 running and, from another terminal,
-   `python3 tools/ptupdate.py TUNER fw/testboard/picotunewh.bin`. Expect TS and status gaps during
+   `python3 tools/ptupdate.py TUNER fw/testboard/w5500/picotunewh.bin`. Expect TS and status gaps during
    the upload and the reboot, whlog re-tuning after 10 s of silence, `trial` then `confirmed`.
 
 Copy the CSVs back to the repository (`fw/agc-test/` is local, like the rest of `fw/`).
