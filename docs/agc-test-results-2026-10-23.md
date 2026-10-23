@@ -50,3 +50,13 @@ timeouts, progress codes in watchdog scratch registers. Needs one USB install.
   on the rough scale above. Either the scale is wrong, the Moon went through the beam's edge, or
   AGC1 is coarse for small noise changes. The Sun (more than 10 dB) is the next step: it calibrates
   AGC1 in dB and checks the pointing model.
+
+## Rotator set for 10 GHz, Moon on/off (21:45-21:55)
+- SPID `track_tolerance` was 0.500 deg (the 1.3 GHz value from the spid repo's `docs/usage.md`), which is
+  why moves under ~0.5 deg did nothing. Set to 0.08 with `el_antibacklash 1` and saved to FRAM (the
+  10 GHz row of that table). Small moves now work.
+- On/off with tracking (rotator offset az +0.5, el +0.2 applied, target updated every 5 s), 4 cycles
+  of 60 s on the Moon and 60 s at +3 deg az, 10485 MHz, 27 500 kS/s:
+  ON-OFF AGC1 = +30.7, +50.9, +25.2, +47.1, mean +38.5 +-5.4 (se). Same size as the second drift scan,
+  so the Moon is detected and the pointing was not the limit: AGC1 changes only ~40 units for it.
+  AGC2 shows nothing. The Sun has to set the AGC1 scale before this means a number of dB.
