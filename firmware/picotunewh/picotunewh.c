@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota2"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet
+#define VERSIONX2	"e-ota3"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan
 
 #define CR		13
 #define LF		10
@@ -4029,6 +4029,329 @@ int __in_flash("my_group_name") ethernet_setup()
 
 volatile	uint32			thenms ;
 
+// =======================================================================================================
+// Band scan on Core1: a [to@wh] tune command with SCANF= (and optionally SCANSR=, SCANMS=) makes the
+// receiver step through the frequencies and symbol rates itself, checking the demodulator every
+// SCANPOLLMS ms. Each lock is reported after SCANHOLDMS ms, so MER, MODCOD and the service name have
+// settled, as one text line to base port + PORTSCAN (9905) of the commanding address:
+//   [from@wh:SCAN] rx=2 freq=10494750 srate=1000 state=DVB-S2 mer=8.3 modcod=QPSK 2/3 lock=640 name=...
+// and every pass ends with [from@wh:SCANPASS] rx=2 pass=n found=k time=ms. The scan repeats until
+// the next tune command for that receiver (freq=0 switches it off).
+//   SCANF=10492750-10499250/500 or SCANF=10493250,10494750,10496250   frequencies in kHz (max 48)
+//   SCANSR=500,333                                                    symbol rates in kS/s (max 4)
+//   SCANMS=1500                                                       wait for a lock; default by SR
+// Once a frequency locks, its other symbol rates are skipped.
+// =======================================================================================================
+
+#define	SCANMAXF			48
+#define	SCANMAXSR			4
+#define	SCANPOLLMS			40						// demodulator state check interval
+#define	SCANHOLDMS			2500					// after a lock, before reporting
+#define	PORTSCAN			5						// results to base port + 5
+
+enum { SCAN_TUNE, SCAN_WAIT, SCAN_HOLD } ;
+
+typedef struct
+{
+	int			active ;
+	int			nf ;
+	int			nsr ;
+	int32		f  [SCANMAXF] ;
+	int32		sr [SCANMAXSR] ;
+	int32		waitms ;							// 0: 400 ms + 600 s / SR(kS/s)
+	int			fi ;
+	int			si ;
+	int			phase ;
+	int			header ;							// DVB-S2 headers seen: something is there
+	uint32		t0 ;
+	uint32		tpoll ;
+	uint32		tlock ;
+	uint32		pass ;
+	uint32		found ;
+	uint32		passstart ;
+} scan_t ;
+
+static	scan_t	scans [MAXRECEIVERS+1] ;
+static	scan_t	scanpending ;						// parsed from the command being processed
+
+
+// parse "1,2,3" or "start-stop/step" after key; returns the count
+
+static int scan_parse_list (char *command, char *key, int32 *list, int max)
+{
+	char	*pos = strstr (command, key) ;
+	int		n = 0 ;
+	int32	start ;
+	int32	stop ;
+	int32	step ;
+
+	if (pos == 0)
+	{
+		return (0) ;
+	}
+	pos += strlen (key) ;
+	while (n < max && isdigit ((unsigned char) *pos))
+	{
+		start = strtol (pos, &pos, 10) ;
+		if (*pos == '-')
+		{
+			stop = strtol (pos + 1, &pos, 10) ;
+			step = 0 ;
+			if (*pos == '/')
+			{
+				step = strtol (pos + 1, &pos, 10) ;
+			}
+			if (step <= 0 || stop < start)
+			{
+				return (0) ;
+			}
+			for ( ; start <= stop && n < max ; start += step)
+			{
+				list [n++] = start ;
+			}
+		}
+		else
+		{
+			list [n++] = start ;
+		}
+		if (*pos != ',')
+		{
+			break ;
+		}
+		pos++ ;
+	}
+	return (n) ;
+}
+
+
+// called while a command is parsed; fills in FREQ= and SRATE= from the scan lists if missing
+
+static void scan_parse (char *command, int32 *freqx, int32 *srx)
+{
+	char	*pos ;
+
+	memset (&scanpending, 0, sizeof(scanpending)) ;
+	scanpending.nf  = scan_parse_list (command, "SCANF=",  scanpending.f,  SCANMAXF) ;
+	scanpending.nsr = scan_parse_list (command, "SCANSR=", scanpending.sr, SCANMAXSR) ;
+	pos = strstr (command, "SCANMS=") ;
+	if (pos)
+	{
+		scanpending.waitms = atoi (pos + strlen ("SCANMS=")) ;
+	}
+	if (scanpending.nf == 0)
+	{
+		return ;
+	}
+	if (*freqx < 0)
+	{
+		*freqx = scanpending.f [0] ;
+	}
+	if (scanpending.nsr == 0 && *srx > 0)
+	{
+		scanpending.sr [0] = *srx ;							// scan with the command's symbol rate
+		scanpending.nsr = 1 ;
+	}
+	if (*srx < 0 && scanpending.nsr)
+	{
+		*srx = scanpending.sr [0] ;
+	}
+}
+
+
+// after a command for rx was processed: start a scan, or stop one
+
+static void scan_command_done (int rx, int good, int32 freqx)
+{
+	if (rx <= 0 || rx > MAXRECEIVERS)
+	{
+		return ;
+	}
+	if (good && freqx != 0 && scanpending.nf && scanpending.nsr)
+	{
+		scans [rx] = scanpending ;
+		scans [rx].active	 = 1 ;
+		scans [rx].phase	 = SCAN_TUNE ;
+		scans [rx].passstart = monotime_ms() ;
+	}
+	else
+	{
+		scans [rx].active = 0 ;
+	}
+}
+
+
+static void scan_send (int rx, char *text)
+{
+	while (xsr10.status == 1) ;										// wait for core 0 to deal with the last request
+	strcpy ((char*) xsr10.buffer, text) ;
+	xsr10.length 	= strlen (text) + 1 ;
+	xsr10.port 		= baseipport + PORTSCAN ;
+	xsr10.typex 	= GENINFOREC ;
+	xsr10.receiver	= rx ;
+	xsr10.status	= 1 ;
+}
+
+
+// retune rx as a tune command would, without touching the command bookkeeping
+
+static void scan_tune (int rx, int32 freq, int32 sr)
+{
+	int		calibrated ;
+
+	if ((freq >= 10490000) && (freq < 10500000))
+	{
+		rcv[rx].qo100mode = QO100BAND ;
+	}
+	else
+	{
+		rcv[rx].qo100mode = QO100NO ;
+	}
+	rcv[rx].requestedfreq 	= freq ;
+	rcv[rx].hardwarefreq	= abs (freq - rcv[rx].requestedloc) ;
+	if (rcv[rx].qo100mode == QO100BAND)
+	{
+		rcv[rx].hardwarefreq -= rcv[rx].qo100locerror ;
+	}
+	rcv[rx].highsideloc 	= freq < rcv[rx].requestedloc ;
+	rcv[rx].frequencies[0]	= freq ;
+	rcv[rx].symbolrates[0]	= sr ;
+	rcv[rx].pmtpid			= 0 ;
+	rcv[rx].lastmodulation	= 0 ;
+	rcv[rx].signalacquiredtime = 0 ;
+	rcv[rx].signallosttime 	= 0 ;
+	rcv[rx].textinfos[STATUS_SERVICE_NAME][0] 			= 0 ;
+	rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME][0] 	= 0 ;
+	sprintf (rcv[rx].textinfos[STATUS_FREQ_REQUESTED], "%.3f", (float) freq / 1000) ;
+
+	calibrated = rcv[rx].qo100locerror && rcv[rx].qo100mode != QO100NO ;
+	GLOBALNIM = rcv[rx].nim ;
+	stv6120_init (rcv[rx].nimreceiver, rcv[rx].hardwarefreq, rcv[rx].antenna, sr) ;
+	stv0910_setup_receive (rcv[rx].nimreceiver, sr, calibrated) ;
+	stv0910_start_scan (rcv[rx].nimreceiver) ;
+	rcv[rx].piorunning 		= 1 ;									// core 0 will restart PIO and DMA
+	rcv[rx].scanstate  		= STATE_SEARCH ;
+	rcv[rx].rawinfos[STATUS_STATE] = STATE_SEARCH ;
+}
+
+
+static void scan_next (int rx, scan_t *s, int locked)
+{
+	char	temps [96] ;
+
+	s->si++ ;
+	if (locked || s->si >= s->nsr)									// a lock: skip the other SRs
+	{
+		s->si = 0 ;
+		s->fi++ ;
+	}
+	if (s->fi >= s->nf)
+	{
+		s->fi = 0 ;
+		s->pass++ ;
+		sprintf
+		(
+			temps, "[from@wh:SCANPASS] rx=%d pass=%u found=%u time=%u\r\n",
+			rx + rxbase, (unsigned) s->pass, (unsigned) s->found, (unsigned) (monotime_ms() - s->passstart)
+		) ;
+		scan_send (rx, temps) ;
+		s->found 	 = 0 ;
+		s->passstart = monotime_ms() ;
+	}
+	s->phase = SCAN_TUNE ;
+}
+
+
+static void scan_report (int rx, scan_t *s)
+{
+	char	temps [320] ;
+
+	s->found++ ;
+	snprintf
+	(
+		temps, sizeof(temps),
+		"[from@wh:SCAN] rx=%d freq=%d srate=%d state=%s mer=%s modcod=%s lock=%u name=%s provider=%s agc1=%s\r\n",
+		rx + rxbase, s->f[s->fi], s->sr[s->si],
+		rcv[rx].textinfos[STATUS_STATE], rcv[rx].textinfos[STATUS_MER], rcv[rx].textinfos[STATUS_MODCOD],
+		(unsigned) s->tlock, rcv[rx].textinfos[STATUS_SERVICE_NAME],
+		rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME], rcv[rx].textinfos[STATUS_AGC1_GAIN]
+	) ;
+	scan_send (rx, temps) ;
+}
+
+
+// called from the Core1 loop
+
+static void scan_poll (void)
+{
+	int		rx ;
+	scan_t	*s ;
+	uint32	now ;
+	uint32	limit ;
+	uint8	state ;
+
+	for (rx = 1 ; rx <= MAXRECEIVERS ; rx++)
+	{
+		s = &scans [rx] ;
+		if (!s->active || !rcv[rx].active)
+		{
+			continue ;
+		}
+		now = monotime_ms() ;
+		switch (s->phase)
+		{
+			case SCAN_TUNE:
+				scan_tune (rx, s->f[s->fi], s->sr[s->si]) ;
+				s->t0 		= now ;
+				s->tpoll 	= now ;
+				s->header 	= 0 ;
+				s->phase 	= SCAN_WAIT ;
+				break ;
+
+			case SCAN_WAIT:
+				if (now - s->tpoll < SCANPOLLMS)
+				{
+					break ;
+				}
+				s->tpoll = now ;
+				GLOBALNIM = rcv[rx].nim ;
+				if (stv0910_read_scan_state (rcv[rx].nimreceiver, &state) != ERROR_NONE)
+				{
+					state = STATE_SEARCH ;									// no answer: let the timeout run
+				}
+				if (state == STATE_DEMOD_S2 || state == STATE_DEMOD_S)
+				{
+					s->tlock = now - s->t0 ;
+					s->t0 	 = now ;
+					s->phase = SCAN_HOLD ;
+					break ;
+				}
+				if (state == STATE_HEADER_S2)
+				{
+					s->header = 1 ;
+				}
+				limit = s->waitms ? s->waitms : 400 + 600000 / s->sr[s->si] ;
+				if (s->header)
+				{
+					limit *= 3 ;											// headers seen: give it longer
+				}
+				if (now - s->t0 >= limit)
+				{
+					scan_next (rx, s, 0) ;
+				}
+				break ;
+
+			case SCAN_HOLD:
+				if (now - s->t0 >= SCANHOLDMS)
+				{
+					scan_report (rx, s) ;
+					scan_next (rx, s, 1) ;
+				}
+				break ;
+		}
+	}
+}
+
+
 void core1_main()
 {
 	int				x ;
@@ -4135,7 +4458,7 @@ void core1_main()
 			) ;
 
 			y = 0 ;
-			for (x = 0 ; x < strlen(commandrxbuff2) ; x++)						// convert to upper case
+			for (x = 0 ; x < strlen(commandrxbuff2) && y < sizeof(commandrxbuff) - 1 ; x++)	// convert to upper case
 			{
 				if (commandrxbuff2[x] >= ' ')
 				{
@@ -4461,12 +4784,15 @@ void core1_main()
 				}
 			}	
 
+			scan_parse (commandrxbuff, &freqx, &srx) ;					// SCANF=, SCANSR=, SCANMS=
+
 // process the parsed command
 
 			if (rx > 0 && headerx > 0 && (freqx == 0 || srx == 0))
 			{
                	GLOBALNIM = rcv[rx].nim ;
                 stv6120_init (rcv[rx].nimreceiver, 0, rcv[rx].antenna, 0) ;			// disable receiver
+                scan_command_done (rx, 0, 0) ;											// stops a scan
                 headerx = 0 ;
        		}
 			else if ((rxx == -1 && freqx == -1 && srx == -1 && locx == -1 && antx == -1) && (headerx >= 0) && (voltx > 0 || volty > 0))
@@ -4674,6 +5000,7 @@ void core1_main()
 
 ///				if (rxx > 0)											// don't reply to scan info
 				{
+					scan_command_done (rx, goodx, freqx) ;					// start or stop a band scan
 					if (goodx)  
 					{
    	    	    		sprintf (commandreplybuff,"[from@wh:GOOD] \"%s\"\r\n",commandrxbuff3) ;
@@ -4712,6 +5039,7 @@ void core1_main()
 			}
 			turp->status = 2 ;											// signal to core 0 that 
 		}																//   the command has been processed
+		scan_poll() ;													// band scan, if one is running
 	}
 }	
 

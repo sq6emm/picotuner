@@ -13,3 +13,4 @@ source (GPL v3, see Upstream below).
   `tools/ptupdate.py` uploads, `tools/uf2pack.py` packs UF2s, `firmware/test/run.sh` tests.
 - `tools/whlog.py` — tune a receiver and log its status (AGC, MER, errors) to CSV, or sweep AGC
   over frequency. Plan for the first test in the tuner: `docs/agc-test.md`.
+- `tools/qo100scan.py` — band scan run by the tuner itself (0v3e-ota3), prints the stations found.

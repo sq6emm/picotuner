@@ -1,4 +1,4 @@
-# PicoTuneWH 0v3e-ota2 (own build)
+# PicoTuneWH 0v3e-ota3 (own build)
 
 G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picotunewh/`, plus:
 
@@ -18,6 +18,19 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
 3. **Update over Ethernet** with the `ptboot` bootloader (`firmware/ptboot/`, layout in
    `firmware/common/ptupdate.h`), on the command port, no extra socket.
 4. Version `ptwh0v3e-ota2-w5100s.uf2`.
+
+5. **Band scan inside the firmware (0v3e-ota3)**: a tune command with `scanf=` makes Core1 step
+   through the channels itself, checking the demodulator every 40 ms:
+   `[to@wh] rcv=2 offset=9750000 fplug=A vgx=hi scanf=10492750-10499250/500 scansr=500,333`
+   - `scanf=` `start-stop/step` or `f1,f2,...` kHz (max 48), `scansr=` up to 4 kS/s values,
+     `scanms=` optional wait for a lock (default 400 ms + 600 s / SR, x3 once DVB-S2 headers show).
+   - A lock skips the frequency's other symbol rates and is reported 2.5 s later to UDP 9905 of
+     the commanding host: `[from@wh:SCAN] rx= freq= srate= state= mer= modcod= lock=ms name=
+     provider= agc1=`; each pass ends with `[from@wh:SCANPASS] rx= pass= found= time=ms`.
+   - Runs until the next tune command for that receiver (`freq=0` switches it off). Off-net hosts
+     must repeat the command within 15 min, as for any tune. `tools/qo100scan.py` does all that.
+   - Also fixed: commands longer than 255 characters overflowed `commandrxbuff`.
+   Untested on hardware so far: parser checked on the host, builds without warnings.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):

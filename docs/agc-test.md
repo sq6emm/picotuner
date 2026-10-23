@@ -45,6 +45,10 @@ the receiver over: status and TS go to the machine running it. Re-send your own 
    `python3 tools/ptupdate.py TUNER fw/testboard/w5500/picotunewh.bin`. Expect TS and status gaps during
    the upload and the reboot, whlog re-tuning after 10 s of silence, `trial` then `confirmed`.
 
+8. **Band scan (0v3e-ota3)**, after the AGC steps: `python3 tools/ptupdate.py TUNER fw/testboard/ota3/w5500/picotunewh.bin`,
+   then `python3 tools/qo100scan.py TUNER --rx 2 --csv fw/agc-test/8-scan.csv` for a few passes.
+   Compare the stations found and the pass time with the old `scanner.sh`.
+
 Copy the CSVs back to the repository (`fw/agc-test/` is local, like the rest of `fw/`).
 
 ## What to look at afterwards
