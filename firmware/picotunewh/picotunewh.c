@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota16"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota17"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -2207,12 +2207,9 @@ void mainloop()
 					rcv[rx].rawinfos[STATUS_STATE] 	= STATE_IDLE ;		
     	   			rcv[rx].signallosttime 			= 0 ;       			
 					rcv[rx].timeoutholdoffcount 	= 4 ;	// send info 4 times after timeout
-					GLOBALNIM = rcv[rx].nim ;
-					stv6120_init 							// configure receiver
-					(
-						rcv[rx].nimreceiver, 0,				// turn off the receiver
-						rcv[rx].antenna,	 rcv[rx].symbolrates[0]				
-					) ;												
+					// The receiver used to be switched off here with stv6120_init(), but this runs on
+					// Core0 and the I2C bus belongs to Core1 (0v3e-ota17). idletime is 0, so this
+					// block is unused; switching off needs a freq=0 command through tur01e instead.
     	   		}
     	   	}
        	}	               
@@ -3649,8 +3646,13 @@ int dhcp_waiting_offer_state_2 (int command)
 			memset (temps, 0, sizeof(temps)) ;
 
 			p = dhcpoffer.options ;
-			while (*p != 255 && (int) p < (int) &dhcpoffer.end_packet)
+			while (*p != 255 && p + 2 <= (uint8 *) &dhcpoffer.end_packet)
 			{
+				if (p[0] == 0)													// pad
+				{
+					p++ ;
+					continue ;
+				}
 				switch (p[0])
 				{
 					case DHCP_MESSAGE_SERVER: if (p[1] == 4) memcpy (dhcp_server_id, p+2, 4) ; break ;
@@ -3790,6 +3792,7 @@ int dhcp_waiting_ack_state_3 (int command)
 		if 
 		(
 			memcmp (dhcpack.bootp_flags, dhcpdisc.bootp_flags, 2) == 0		&&
+			memcmp (dhcpack.transaction_id, dhcpdisc.transaction_id, 4) == 0	&&		// our exchange (0v3e-ota17)
 			memcmp (dhcpack.mac2, dhcpdisc.mac2, MAC_SIZE) == 0				&&
 			memcmp (dhcpack.magic_cookie, dhcpdisc.magic_cookie, 4) == 0	&&
 			memcmp (received_address, netinfo.rx, 4) == 0					&&
@@ -3801,16 +3804,25 @@ int dhcp_waiting_ack_state_3 (int command)
 				memset (message, 0, sizeof(message)) ;
 				memset (temps, 0, sizeof(temps)) ;
 				p = dhcpack.options ;
-				while (*p != 255 && (int) p < (int) &dhcpack.end_packet)
-				{			
+				while (*p != 255 && p + 2 <= (uint8 *) &dhcpack.end_packet)	// lengths checked (0v3e-ota17):
+				{																	// a long option overflowed message[]
+					if (p[0] == 0)													// pad
+					{
+						p++ ;
+						continue ;
+					}
+					if (p + 2 + p[1] > (uint8 *) &dhcpack.end_packet)
+					{
+						break ;
+					}
 					switch (p[0])
 					{
-						case DHCP_MESSAGE_GATEWAY: 		memcpy (&netinfo.gw, p+2, 4) 		; break ;
-						case DHCP_MESSAGE_DNS: 			memcpy (&netinfo.dns, p+2, 4) 		; break ;
-						case DHCP_MESSAGE_SUBNET: 		memcpy (&netinfo.sn, p+2, 4) 		; break ;
-						case DHCP_MESSAGE: 				strncpy (message, (p+2), p[1]) 		; break ;
-						case DHCP_MESSAGE_SERVER: 		memcpy (&netinfo.sv, p+2, 4) ; 		; break ;
-						case DHCP_MESSAGE_LEASETIME:	memcpy (temps,p+2, 4) ; break ;
+						case DHCP_MESSAGE_GATEWAY: 		if (p[1] >= 4) memcpy (&netinfo.gw, p+2, 4) ; break ;
+						case DHCP_MESSAGE_DNS: 			if (p[1] >= 4) memcpy (&netinfo.dns, p+2, 4) ; break ;
+						case DHCP_MESSAGE_SUBNET: 		if (p[1] == 4) memcpy (&netinfo.sn, p+2, 4) ; break ;
+						case DHCP_MESSAGE: 				strncpy (message, (p+2), (p[1] < sizeof(message) ? p[1] : sizeof(message) - 1)) ; break ;
+						case DHCP_MESSAGE_SERVER: 		if (p[1] == 4) memcpy (&netinfo.sv, p+2, 4) ; break ;
+						case DHCP_MESSAGE_LEASETIME:	if (p[1] == 4) memcpy (temps,p+2, 4) ; break ;
 						default: break ;
 					} ;
 					p += p[1] + 2 ;
@@ -3844,11 +3856,20 @@ int dhcp_waiting_ack_state_3 (int command)
 			{
 				memset (message, 0, sizeof(message)) ;
 				p = dhcpack.options ;
-				while (*p != 255 && (int) p < (int) &dhcpack.end_packet)
-				{			
+				while (*p != 255 && p + 2 <= (uint8 *) &dhcpack.end_packet)
+				{
+					if (p[0] == 0)
+					{
+						p++ ;
+						continue ;
+					}
+					if (p + 2 + p[1] > (uint8 *) &dhcpack.end_packet)
+					{
+						break ;
+					}
 					switch (p[0])
 					{
-						case DHCP_MESSAGE: strncpy (message, (p+2), p[1]) ; break ;
+						case DHCP_MESSAGE: strncpy (message, (p+2), (p[1] < sizeof(message) ? p[1] : sizeof(message) - 1)) ; break ;
 						default: break ;
 					} ;
 					p += p[1] + 2 ;
@@ -4172,7 +4193,7 @@ typedef struct
 	int			nsr ;
 	int32		f  [SCANMAXF] ;
 	int32		sr [SCANMAXSR] ;
-	int32		waitms ;							// 0: 400 ms + 600 s / SR(kS/s)
+	int32		waitms ;							// 0: 400 ms + 400 s / SR(kS/s)
 	int			fi ;
 	int			si ;
 	int			phase ;
@@ -4401,6 +4422,53 @@ static void scan_parse (char *command, int32 *freqx, int32 *srx)
 }
 
 
+// drop frequencies the tuner cannot reach with this LO and symbol rates outside the command limits,
+// and keep the timings sane (0v3e-ota17: they went straight to the tuner; a negative SCANMS= became a
+// huge unsigned wait and the scan stood still)
+
+static void scan_validate (int rx, scan_t *s)
+{
+	int		fi ;
+	int		si ;
+	int		n = 0 ;
+	int32	d ;
+	uint8	srbad = 0 ;
+
+	for (si = 0 ; si < s->nsr ; si++)
+	{
+		if (s->sr [si] < MINSR || s->sr [si] > MAXSR)
+		{
+			srbad |= 1 << si ;
+		}
+	}
+	for (fi = 0 ; fi < s->nf ; fi++)
+	{
+		d = s->f [fi] - (int32) rcv[rx].requestedloc ;
+		if (d < 0)
+		{
+			d = -d ;
+		}
+		if (d < MINFREQ || d > MAXFREQ || (s->srmask [fi] & ~srbad) == 0)
+		{
+			continue ;
+		}
+		s->f [n] 	  = s->f [fi] ;
+		s->srmask [n] = s->srmask [fi] & ~srbad ;
+		memcpy (s->names [n], s->names [fi], SCANNAMELEN) ;
+		n++ ;
+	}
+	s->nf = n ;
+	if (s->waitms < 0 || s->waitms > 20000)
+	{
+		s->waitms = 0 ;													// the default by SR
+	}
+	if (s->screenwait < 5 || s->screenwait > 1000)
+	{
+		s->screenwait = SCANSCREENMS ;
+	}
+}
+
+
 // after a command for rx was processed: start a scan, or stop one
 
 static void scan_command_done (int rx, int good, int32 freqx)
@@ -4422,8 +4490,25 @@ static void scan_command_done (int rx, int good, int32 freqx)
 		agchold [rx]   = HOLD_PENDING ;									// held by agc_poll once settled
 		agcholdat [rx] = monotime_ms() + AGCHOLDMS ;
 	}
+	if (good && freqx != 0)
+	{
+		scan_validate (rx, &scanpending) ;
+	}
 	if (good && freqx != 0 && scanpending.nf && scanpending.nsr)
 	{
+		int		fi ;
+		int		fj ;
+
+		for (fi = 0 ; fi < scanpending.nf ; fi++)						// keep the names already read (the same
+		{																// scan command comes again every few minutes)
+			for (fj = 0 ; fj < scans [rx].nf ; fj++)
+			{
+				if (scans [rx].f [fj] == scanpending.f [fi])
+				{
+					memcpy (scanpending.names [fi], scans [rx].names [fj], SCANNAMELEN) ;
+				}
+			}
+		}
 		scans [rx] = scanpending ;
 		scans [rx].active	 = 1 ;
 		scans [rx].phase	 = SCAN_TUNE ;
@@ -4896,7 +4981,8 @@ static void scan_poll (void)
 				break ;
 
 			case SCAN_HOLD:
-				limit = (s->pass % SCANNAMEEVERY) == 0 ? SCANNAMEMS : SCANHOLDMS ;
+				limit = ((s->pass % SCANNAMEEVERY) == 0 && s->names [s->fi][0] == 0) ? SCANNAMEMS : SCANHOLDMS ;	// a name
+																		// once known is not waited for again (0v3e-ota17)
 				if (now - s->t0 < limit || now - s->tpoll < SCANPOLLMS)
 				{
 					break ;
@@ -5046,7 +5132,7 @@ void core1_main()
 
 			sprintf 
 			(
-				(char*)lastincomingcommand, "Last command (%d): %s", 
+				(char*)lastincomingcommand, "Last command (%d): %.200s", 		// commands can be up to 1315 bytes
 				turp->receivedonport, commandrxbuff2
 			) ;
 
@@ -6077,6 +6163,10 @@ static	uint32			counter ;
 						sprintf (rcv[rx].textinfos[y] + 4 * z, "%02X%02X", sym_i, sym_q) ;
 					}
 					rcv[rx].rawinfos[y] = z ;
+
+					y = STATUS_I2C_ERRORS ;														// parameter 41
+					rcv[rx].rawinfos[y] = i2c_errors ;
+					sprintf (rcv[rx].textinfos[y], "%u", (unsigned) i2c_errors) ;
 
 					y = STATUS_LOCK_FLAGS ;														// parameter 38, also while searching
 					if (stv0910_read_lock_flags (rcv[rx].nimreceiver, !locked_s, &value) == ERROR_NONE)

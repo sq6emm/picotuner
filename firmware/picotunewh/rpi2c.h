@@ -80,5 +80,7 @@
 	int		i2c_write_pic8		(uint8_t, uint8_t,  uint8_t) ;
 	int		i2c_read_pic8		(uint8_t, uint8_t, 	uint8_t*) ;
 
+extern volatile uint32_t i2c_errors ;			// failed or timed-out I2C transfers since start ($41)
+
 #endif
 

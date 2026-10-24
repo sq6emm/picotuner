@@ -4,7 +4,8 @@ A small web page for a PicoTuner (PicoTuneWH 0v3e-ota13 or later): the tuner's o
 the QO-100 wideband transponder as a live list, and the chosen station as a re-encoded,
 low-bitrate HLS stream (480p, about 400 kb/s) for watching over the internet.
 
-- With nobody watching, both receivers scan the BATC WB bandplan (about 2 s per pass).
+- With nobody watching, both receivers scan the BATC WB bandplan (about 2-3 s per pass on an
+  empty band, longer with stations and on the passes that read service names).
 - Anyone picks a station (one change per 15 s for everybody): RX1 tunes to it, ffmpeg re-encodes its TS to HLS, and RX2 keeps scanning the
   whole plan. Everybody watches the same station.
 - When nobody has watched for `IDLE_STOP_S` (60 s), the stream stops and both receivers scan

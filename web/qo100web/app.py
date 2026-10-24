@@ -1,4 +1,4 @@
-"""QO-100 web monitor for a PicoTuner (PicoTuneWH 0v3e-ota13 or later).
+"""QO-100 web monitor for a PicoTuner (PicoTuneWH 0v3e-ota16 or later).
 
 Runs next to the tuner on the LAN, behind any reverse proxy and under any path (all URLs are
 relative). It drives the tuner over UDP:
@@ -100,30 +100,38 @@ def fields_between(line, key, nxt):
 
 class ScanProtocol(asyncio.DatagramProtocol):
     def datagram_received(self, data, addr):
+        if addr[0] != TUNER:                             # only the tuner: anything else could inject into the page
+            return
         for line in data.decode(errors='replace').replace('\x00', '').splitlines():
-            kv = {p.split('=', 1)[0]: p.split('=', 1)[1] for p in line.split() if '=' in p}
-            if line.startswith('[from@wh:SCAN]'):
-                freq = int(kv.get('freq', 0))
-                st = S.stations.get(freq, {})
-                name = fields_between(line, ' name=', ' provider=').strip()
-                st.update(freq=freq, srate=int(kv.get('srate', 0)), state=kv.get('state', ''),
-                          mer=kv.get('mer', ''), modcod=fields_between(line, ' modcod=', ' lock=').strip(),
-                          agc2=kv.get('agc2', ''), rx=int(kv.get('rx', 0)), seen=time.time())
-                if name:
-                    st['name'] = name
-                    st['provider'] = fields_between(line, ' provider=', ' agc1=').strip()
-                for k in ('video', 'audio'):                 # ota15+, known once the TS showed them
-                    if kv.get(k):
-                        st[k] = kv[k]
-                st['d'] = decode_margin(st['mer'], st['modcod'])
-                st['capacity'] = capacity_kbps(st['srate'], st['modcod'], st['state'])
-                st.setdefault('first', time.time())
-                S.stations[freq] = st
-            elif line.startswith('[from@wh:SCANPASS]'):
-                rx = int(kv.get('rx', 0))
-                S.passes[rx] = {'time': int(kv.get('time', 0)), 'found': int(kv.get('found', 0)),
-                                'screen': int(kv.get('screen', 0)), 'candidates': int(kv.get('candidates', 0)),
-                                'at': time.time()}
+            try:
+                self.line(line)
+            except (ValueError, KeyError, IndexError):
+                pass                                     # a malformed line is dropped
+
+    def line(self, line):
+        kv = {p.split('=', 1)[0]: p.split('=', 1)[1] for p in line.split() if '=' in p}
+        if line.startswith('[from@wh:SCAN]'):
+            freq = int(kv.get('freq', 0))
+            st = S.stations.get(freq, {})
+            name = fields_between(line, ' name=', ' provider=').strip()
+            st.update(freq=freq, srate=int(kv.get('srate', 0)), state=kv.get('state', ''),
+                      mer=kv.get('mer', ''), modcod=fields_between(line, ' modcod=', ' lock=').strip(),
+                      agc2=kv.get('agc2', ''), rx=int(kv.get('rx', 0)), seen=time.time())
+            if name:
+                st['name'] = name
+                st['provider'] = fields_between(line, ' provider=', ' agc1=').strip()
+            for k in ('video', 'audio'):                 # ota15+, known once the TS showed them
+                if kv.get(k):
+                    st[k] = kv[k]
+            st['d'] = decode_margin(st['mer'], st['modcod'])
+            st['capacity'] = capacity_kbps(st['srate'], st['modcod'], st['state'])
+            st.setdefault('first', time.time())
+            S.stations[freq] = st
+        elif line.startswith('[from@wh:SCANPASS]'):
+            rx = int(kv.get('rx', 0))
+            S.passes[rx] = {'time': int(kv.get('time', 0)), 'found': int(kv.get('found', 0)),
+                            'screen': int(kv.get('screen', 0)), 'candidates': int(kv.get('candidates', 0)),
+                            'at': time.time()}
 
 
 # MER needed to decode each MODCOD (tenths of dB), as in the firmware's modinfo tables
@@ -159,6 +167,14 @@ def capacity_kbps(srate, modcod, state):
 
 class StatusProtocol(asyncio.DatagramProtocol):
     def datagram_received(self, data, addr):
+        if addr[0] != TUNER:
+            return
+        try:
+            self.status(data)
+        except (ValueError, KeyError, IndexError):
+            pass
+
+    def status(self, data):
         d = {}
         for line in data.decode(errors='replace').replace('\x00', '').split('\r\n'):
             if line.startswith('$') and ',' in line:
@@ -198,8 +214,21 @@ def clear_hls():
             p.unlink()
 
 
+FFMPEG_LOCK = asyncio.Lock()
+
+
 async def start_ffmpeg():
-    await stop_ffmpeg()
+    async with FFMPEG_LOCK:                              # api_tune and the supervisor could both start one
+        await _stop_ffmpeg()
+        await _start_ffmpeg()
+
+
+async def stop_ffmpeg():
+    async with FFMPEG_LOCK:
+        await _stop_ffmpeg()
+
+
+async def _start_ffmpeg():
     clear_hls()
     args = ['ffmpeg', '-hide_banner', '-loglevel', 'warning', '-nostdin',
             '-fflags', '+genpts+discardcorrupt', '-analyzeduration', '4M', '-probesize', '4M',
@@ -217,14 +246,16 @@ async def start_ffmpeg():
     S.ffmpeg = await asyncio.create_subprocess_exec(*args)
 
 
-async def stop_ffmpeg():
-    p, S.ffmpeg = S.ffmpeg, None
+async def _stop_ffmpeg():
+    p = S.ffmpeg
     if p and p.returncode is None:
         p.terminate()
         try:
             await asyncio.wait_for(p.wait(), 5)
         except asyncio.TimeoutError:
             p.kill()
+            await p.wait()
+    S.ffmpeg = None
 
 
 async def supervisor():
@@ -247,7 +278,7 @@ async def supervisor():
             clear_hls()
             apply_mode()
             last_send = now
-        if S.viewing and (S.ffmpeg is None or S.ffmpeg.returncode is not None):
+        if S.viewing and not FFMPEG_LOCK.locked() and (S.ffmpeg is None or S.ffmpeg.returncode is not None):
             await start_ffmpeg()                         # no TS for 20 s or a decoder error
         if now - last_send > RESEND_S:
             apply_mode()
@@ -258,11 +289,27 @@ async def supervisor():
 # ---------------------------------------------------------------------------------------------
 # HTTP
 
-def change_allowed():
-    wait = CHANGE_GAP_S - (time.time() - S.last_change)
+CLIENT_GAP_S = 4 * CHANGE_GAP_S                         # one address: one change per minute by default
+last_by_client = {}
+
+
+def client_ip(request):
+    fwd = request.headers.get('X-Forwarded-For', '')     # set by the nginx in front
+    return (fwd.split(',')[0].strip() if fwd else request.remote) or '?'
+
+
+def change_allowed(request, what):
+    now, ip = time.time(), client_ip(request)
+    wait = CHANGE_GAP_S - (now - S.last_change)
     if wait > 0:
         raise web.HTTPTooManyRequests(text=f'someone just changed the station; try again in {int(wait) + 1} s')
-    S.last_change = time.time()
+    wait = CLIENT_GAP_S - (now - last_by_client.get(ip, 0))
+    if wait > 0:
+        raise web.HTTPTooManyRequests(text=f'you changed the station a moment ago; try again in {int(wait) + 1} s')
+    S.last_change = last_by_client[ip] = now
+    for k in [k for k, t in last_by_client.items() if now - t > CLIENT_GAP_S]:
+        del last_by_client[k]
+    print(f'{time.strftime("%Y-%m-%d %H:%M:%S")} {ip} {what}', flush=True)
 
 
 async def index(request):
@@ -337,14 +384,17 @@ async def api_state(request):
 
 
 async def api_tune(request):
-    body = await request.json()
-    freq, srate = int(body['freq']), int(body['srate'])
+    try:
+        body = await request.json()
+        freq, srate = int(body['freq']), int(body['srate'])
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise web.HTTPBadRequest(text='expected {"freq": kHz, "srate": kS/s}')
     if not (10489000 <= freq <= 10500000) or srate not in (33, 66, 125, 250, 333, 500, 1000, 1500, 2000):
         raise web.HTTPBadRequest(text='not a QO-100 WB channel')
     if S.viewing and S.viewing['freq'] == freq and S.viewing['srate'] == srate:
         S.last_viewer = time.time()
         return web.json_response({'ok': True})          # already on: just watch
-    change_allowed()
+    change_allowed(request, f'tune {freq} {srate}')
     S.viewing = {'freq': freq, 'srate': srate, 'since': time.time()}
     S.last_viewer = time.time()
     apply_mode()
@@ -353,7 +403,9 @@ async def api_tune(request):
 
 
 async def api_stop(request):
-    change_allowed()
+    if not S.viewing:
+        return web.json_response({'ok': True})
+    change_allowed(request, 'stop')
     S.viewing = None
     await stop_ffmpeg()
     clear_hls()
@@ -365,12 +417,13 @@ async def hls(request):
     name = request.match_info['name']
     if '/' in name or not (name.endswith('.m3u8') or name.endswith('.ts')):
         raise web.HTTPNotFound()
-    p = HLS_DIR / name
-    if not p.exists():
+    try:
+        body = (HLS_DIR / name).read_bytes()
+    except OSError:                                      # not there, or deleted by ffmpeg meanwhile
         raise web.HTTPNotFound()
     cache = 'no-cache' if name.endswith('.m3u8') else 'max-age=60'
     ctype = 'application/vnd.apple.mpegurl' if name.endswith('.m3u8') else 'video/mp2t'
-    return web.Response(body=p.read_bytes(), content_type=ctype, headers={'Cache-Control': cache})
+    return web.Response(body=body, content_type=ctype, headers={'Cache-Control': cache})
 
 
 async def on_startup(app):

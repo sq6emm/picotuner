@@ -385,6 +385,31 @@ static void selftest (void)
 	expect (boot() == EXIT_APP && slot_crc (PT_APP_BASE, sizeof(old)) == old_crc, "ignored, old image runs") ;
 	expect (!pt_meta_header_valid (meta_()), "metadata cleared") ;
 
+	printf ("BEGIN while on trial\n") ;							// 0v3e-ota17: refused, so the trial is not lost
+	{
+		uint8_t		begin [32] = "PTUP" ;
+		uint8_t		host [4] = {127, 0, 0, 1} ;
+		uint32_t	size = sizeof(new) ;
+		uint32_t	crc = pt_crc32 (new, sizeof(new)) ;
+
+		memcpy (FLASH + (PT_APP_BASE - XIP_BASE), old, sizeof(old)) ;
+		stage (new, sizeof(new), sizeof(old)) ;
+		boot() ;
+		begin [4] = PTUP_CMD_BEGIN ;
+		memcpy (begin + 8, &size, 4) ;
+		memcpy (begin + 12, &crc, 4) ;
+		begin [16] = 9 ;
+		memcpy (begin + 17, "picotuner", 9) ;
+		core1_start() ;
+		ota_handle (0, begin, 26, host, 1234) ;
+		expect (!ota_active(), "refused during the trial") ;
+		expect (meta_()->installed == PT_FLAG_SET && meta_()->confirmed != PT_FLAG_SET, "trial kept") ;
+		((pt_meta_t *) (FLASH + (PT_META_BASE - XIP_BASE)))->confirmed = PT_FLAG_SET ;	// as ota_poll() would after 60 s
+		ota_handle (0, begin, 26, host, 1234) ;
+		expect (ota_active(), "accepted once confirmed") ;
+		core1_halt() ;
+	}
+
 	printf ("%s\n", failures ? "FAILED" : "all passed") ;
 	exit (failures != 0) ;
 }

@@ -1,4 +1,4 @@
-# PicoTuneWH 0v3e-ota16 (own build)
+# PicoTuneWH 0v3e-ota17 (own build)
 
 G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picotunewh/`, plus:
 
@@ -23,7 +23,8 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
    through the channels itself, checking the demodulator every 40 ms:
    `[to@wh] rcv=2 offset=9750000 fplug=A vgx=hi scanf=10492750-10499250/500 scansr=500,333`
    - `scanf=` `start-stop/step` or `f1,f2,...` kHz (max 48), `scansr=` up to 4 kS/s values,
-     `scanms=` optional wait for a lock (default 400 ms + 600 s / SR, x3 once DVB-S2 headers show).
+     `scanms=` optional wait for a lock (default 400 ms + 600 s / SR in ota3, 400 ms + 400 s / SR since
+     ota13; x3 once DVB-S2 headers show).
    - A lock skips the frequency's other symbol rates and is reported 2.5 s later to UDP 9905 of
      the commanding host: `[from@wh:SCAN] rx= freq= srate= state= mer= modcod= lock=ms name=
      provider= agc1=`; each pass ends with `[from@wh:SCANPASS] rx= pass= found= time=ms`.
@@ -54,7 +55,7 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
    (25 ms each; a carrier lowers AGC2 against a local noise reference, the highest AGC2 within
    1.6 MHz), then tries a lock only on the candidates; the lock timeout is 400 ms + 400 s / SR
    (kS/s); a lock is held 300 ms, every 10th pass 2.5 s for the service name (other passes report
-   the last name seen). Carriers that do not lock are retried only every 8th pass, staggered.
+   the last name seen). Carriers that do not lock are retried only every 8th pass (16th since ota16), staggered.
    Groups: `SCANF=a;b;c SCANSR=x;y;z` give each frequency list its own symbol rates
    (QO-100 WB bandplan: 500 kS/s only up to 10496.75 MHz). `SCANSCREEN=ms` changes the screen
    wait. The pass line carries `screen=`, `candidates=` and all AGC2 readings. On 2026-10-24,
@@ -79,6 +80,22 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
     a receiver locked outside a scan (someone watching it) counts as found, and carriers that do
     not lock are retried every 16th pass. With RX2 scanning the whole plan alone while RX1 shows
     the beacon, a pass went from 5.5-25.8 s to 2.7-8 s.
+
+12. **Robustness fixes from a code review (0v3e-ota17)**:
+    - a command longer than about 235 bytes overflowed `lastincomingcommand` (inherited); now
+      cut at 200 characters;
+    - I2C transfers have a 10 ms timeout instead of waiting for ever on a stuck bus (Core1 used
+      to stop until the watchdog, again and again); failures are counted in `$41`;
+    - PTUP replies are always terminated (a long state text sent stack bytes);
+    - BEGIN is refused while the running image is on trial (it erased the metadata, losing the
+      confirmation and the way back); `ptupdate.py` shows the reason and stops when an update
+      makes no progress;
+    - DHCP option lengths are checked and the ACK's transaction id compared;
+    - scan lists are checked against the LO range and the SR limits, `SCANMS=`/`SCANSCREEN=`
+      kept sane (a negative value stopped the scan);
+    - the receiver switch-off on idle no longer calls I2C from Core0 (unused, idletime 0);
+    - the name-collecting pass (every 10th) only waits for stations without a name yet, and
+      names survive the same scan command sent again.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):
@@ -122,7 +139,8 @@ model at 0x10000000: install, rollback, a power cut at every flash operation (11
 - Upload speed: 82–84 KiB/s from `power` (wired), 60–75 KiB/s from the notebook on Wi-Fi with
   two slow runs (2 and 7 KiB/s, few resends; never seen on the wired host). Outside a session the
   command port is polled every 250 ms as in the original, so a lone INFO takes ~250 ms.
-- Not covered without a NIM: the `$2/$3/$4/$5/$7/$8/$10/$11/$21-23/$26-28/$35/$36` values, I2C under the Core1 lockout, TS.
+- Not covered without a NIM: the `$2/$3/$4/$5/$7/$8/$10/$11/$21-23/$26-28/$35/$36` values, I2C while Core1
+  is parked, TS (all checked later in the tuner).
 
 ## Cold start: crystal start-up (found on the test W5100S-EVB-Pico)
 After a power-on the test board stayed dark (no USB, no LED) with every SDK 1.4.0 build at the
@@ -135,8 +153,8 @@ running, 2 short = starting the app, 5 fast = no app, BOOTSEL), `PTBOOT_START_DE
 `STANDALONE=1` (app at 0x10000000 without ptboot), `XOSC_MULT=n`, `VERSION_TAG=x`.
 
 ## Limits / risks
-- Still to try on the real tuner: AGC/power/LNA values, Core1 lockout while it waits on I2C,
-  TS during sector writes. ptboot itself is only replaced over USB.
+- ptboot itself is only replaced over USB. (The SDK multicore lockout of ota2 was replaced in ota4 by
+  Core1 parking itself in RAM; tested in the tuner.)
 - Each 4 KiB sector write pauses Core1 and interrupts on Core0 for tens of ms: TS drops packets
   during an upload (the status/command path keeps working).
 - The key travels in clear text on the LAN; it stops accidents, not an attacker on the network.

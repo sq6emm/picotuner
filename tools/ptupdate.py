@@ -99,8 +99,9 @@ def main():
     print(f'image: {len(data)} bytes, CRC-32 {crc:08x}')
 
     key = a.key.encode()
-    check(*t.request(CMD_BEGIN, struct.pack('<IIB', len(data), crc, len(key)) + key, timeout=3)[:2], 'begin')
-    offset, started = 0, time.monotonic()
+    status, value, text = t.request(CMD_BEGIN, struct.pack('<IIB', len(data), crc, len(key)) + key, timeout=3)
+    check(status, value, f'begin{": " + text if text else ""}')
+    offset, started, stalled = 0, time.monotonic(), 0
     while offset < len(data):
         chunk = data[offset:offset + CHUNK]
         status, value, _ = t.request(CMD_DATA, struct.pack('<IH', offset, len(chunk)) + chunk, timeout=1.5)
@@ -108,6 +109,9 @@ def main():
             offset = value
             continue
         check(status, value, f'data at {offset}')
+        stalled = stalled + 1 if value <= offset else 0   # OK without progress: a flash write failed
+        if stalled >= 20:
+            sys.exit(f'no progress at {offset} after 20 tries (flash writes failing?); the update is not installed')
         offset = value
         print(f'\r{offset}/{len(data)} bytes', end='', flush=True)
     print(f'  ({len(data) / 1024 / (time.monotonic() - started):.1f} KiB/s, {t.resends} resends)')

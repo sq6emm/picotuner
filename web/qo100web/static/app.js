@@ -31,7 +31,7 @@ function render(s) {
     const btn = `<button class="ghost" data-f="${st.freq}" data-s="${st.srate}">${on ? 'On' : 'Watch'}</button>`;
     return `<tr class="${on ? 'on' : ''}"><td>${(st.freq / 1000).toFixed(3)}</td><td>${st.srate}</td>` +
       `<td class="call" title="${escapeHtml(st.name || '')}">${escapeHtml(st.name || '')}</td>` +
-      `<td class="mer ${dClass(st.d)}">${st.mer || ''}</td><td class="${dClass(st.d)}">${dText(st.d)}</td>` +
+      `<td class="mer ${dClass(st.d)}">${escapeHtml(String(st.mer || ''))}</td><td class="${dClass(st.d)}">${dText(st.d)}</td>` +
       `<td>${escapeHtml(st.modcod || '')}</td><td>${escapeHtml(codecs(st))}</td>` +
       `<td title="estimated channel capacity">${st.capacity ? '≈' + kbps(st.capacity) : ''}</td>` +
       `<td>${Math.round(st.age)} s</td><td>${btn}</td></tr>`;

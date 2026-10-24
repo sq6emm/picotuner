@@ -123,6 +123,36 @@ uint rpi2c_init (uint baudrate)
 /* return: error code                                                                                 */
 /* -------------------------------------------------------------------------------------------------- */
 
+// Bounded I2C transfers (0v3e-ota17): the SDK's *_blocking calls wait for ever on a stuck bus, which
+// stopped Core1 until the watchdog reset, over and over, with no clue why. A transfer of up to three
+// bytes takes about 0.3 ms at 100 kHz; failures are counted in i2c_errors ($41).
+
+#define	I2C_TIMEOUT_US		10000
+
+volatile	uint32_t	i2c_errors ;
+
+static int i2c_write_bounded (uint8_t i2caddr, const uint8_t *data, size_t length)
+{
+	int		status = i2c_write_timeout_us (i2c_default, i2caddr >> 1, data, length, 0, I2C_TIMEOUT_US) ;
+
+	if (status < 0)
+	{
+		i2c_errors++ ;
+	}
+	return (status) ;
+}
+
+static int i2c_read_bounded (uint8_t i2caddr, uint8_t *data, size_t length)
+{
+	int		status = i2c_read_timeout_us (i2c_default, i2caddr >> 1, data, length, 0, I2C_TIMEOUT_US) ;
+
+	if (status < 0)
+	{
+		i2c_errors++ ;
+	}
+	return (status) ;
+}
+
 int i2c_read_reg16 (uint8_t i2caddr, uint16_t reg, uint8_t *val) 
 {
     int 		status ;
@@ -131,10 +161,15 @@ int i2c_read_reg16 (uint8_t i2caddr, uint16_t reg, uint8_t *val)
 	datax [0] = (reg >> 8) & 0xff ;
 	datax [1] = (reg >> 0) & 0xff ;
 
-	status = i2c_write_blocking (i2c_default, i2caddr >> 1, datax, 2, 0) ;	// release bus at end
-	status = i2c_read_blocking  (i2c_default, i2caddr >> 1, datax, 1, 0) ;
-
-	*val = datax [0] ;
+	status = i2c_write_bounded (i2caddr, datax, 2) ;						// release bus at end
+	if (status >= 0)
+	{
+		status = i2c_read_bounded (i2caddr, datax, 1) ;
+	}
+	if (status >= 0)
+	{
+		*val = datax [0] ;
+	}
 
 	if (status >= 0)
 	{
@@ -213,7 +248,7 @@ int i2c_write_reg16 (uint8_t i2caddr, uint16_t reg, uint8_t val)
 	datax [1] = (reg >> 0) & 0xff ;
 	datax [2] = val ;
 
-	status = i2c_write_blocking (i2c_default, i2caddr >> 1, datax, 3, 0) ;		// release bus at end
+	status = i2c_write_bounded (i2caddr, datax, 3) ;							// release bus at end
 
 ///	printf ("i2cw16 exit\r\n") ; /////////	
 
@@ -284,10 +319,15 @@ int i2c_read_reg8 (uint8_t i2caddr, uint8_t reg, uint8_t *val)
 
 	datax [0] = reg ;
 
-	status = i2c_write_blocking (i2c_default, i2caddr >> 1, datax, 1, 0) ;	// release bus at end
-	status = i2c_read_blocking  (i2c_default, i2caddr >> 1, datax, 1, 0) ;
-
-	*val = datax [0] ;
+	status = i2c_write_bounded (i2caddr, datax, 1) ;						// release bus at end
+	if (status >= 0)
+	{
+		status = i2c_read_bounded (i2caddr, datax, 1) ;
+	}
+	if (status >= 0)
+	{
+		*val = datax [0] ;
+	}
 
 	if (status >= 0)
 	{
@@ -371,7 +411,7 @@ int i2c_write_reg8 (uint8_t i2caddr, uint8_t reg, uint8_t val)
 	datax [0] = reg ;
 	datax [1] = val ;
 
-	status = i2c_write_blocking (i2c_default, i2caddr >> 1, datax, 2, 0) ;		// release bus at end
+	status = i2c_write_bounded (i2caddr, datax, 2) ;							// release bus at end
 
 	if (status >= 0)
 	{

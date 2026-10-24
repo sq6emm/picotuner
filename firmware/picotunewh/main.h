@@ -86,6 +86,7 @@
 #define STATUS_LOCK_FLAGS		  38		// bit0 carrier, bits1-2 timing quality, bit3 demod, bit4 FEC, bit5 TS, bit6 ADC overload, bit7 gain held (AGCHOLD=1)
 #define STATUS_PACKET_ERRORS	  39		// bad TS packets since the lock (error counter 2)
 #define STATUS_CONSTELLATION	  40		// 15 symbols as hex IIQQ pairs (signed bytes)
+#define STATUS_I2C_ERRORS		  41		// failed or timed-out I2C transfers since start (0v3e-ota17)
 
 #define STATUS_VGX_STATE		  86		// voltage generator state
 #define STATUS_VGY_STATE		  87		// voltage generator state

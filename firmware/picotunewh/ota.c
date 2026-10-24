@@ -247,8 +247,9 @@ static int flash_write (uint32_t address, const uint8_t *data, uint32_t length, 
 
 static void reply_to (int socket, uint8_t *address, uint16_t port, uint8_t cmd, uint8_t status, uint16_t seq, uint32_t value, const char *text)
 {
-	uint8_t		buff [PTUP_HEADER_SIZE + 4 + 128] ;
+	uint8_t		buff [PTUP_HEADER_SIZE + 4 + 220] ;
 	uint32_t	length = PTUP_HEADER_SIZE + 4 ;
+	uint32_t	room = sizeof(buff) - length - 1 ;
 
 	memcpy (buff, "PTUP", 4) ;
 	buff [4] = cmd | PTUP_REPLY ;
@@ -257,7 +258,8 @@ static void reply_to (int socket, uint8_t *address, uint16_t port, uint8_t cmd, 
 	memcpy (buff + 8, &value, 4) ;
 	if (text)
 	{
-		strncpy ((char *) buff + length, text, 127) ;
+		strncpy ((char *) buff + length, text, room) ;
+		buff [length + room] = 0 ;								// strncpy leaves it open on a long text
 		length += strlen ((char *) buff + length) ;
 	}
 	ota_trace (0, 0x30) ;
@@ -433,6 +435,15 @@ void ota_handle (int socket, const uint8_t *buff, int length, uint8_t *address, 
 			if (session.active && !from_session && monotime_ms_ota() - session.last_ms < OTA_SESSION_TIMEOUT_MS)
 			{
 				reply_to (socket, address, port, cmd, PTUP_ERR_STATE, seq, 0, "busy") ;
+				break ;
+			}
+			if 															// the running image is on trial: erasing the
+			(															// metadata now would lose its confirmation and
+				pt_meta_header_valid (meta()) && meta()->installed == PT_FLAG_SET &&	// the way back
+				meta()->confirmed != PT_FLAG_SET && meta()->rolled_back != PT_FLAG_SET
+			)
+			{
+				reply_to (socket, address, port, cmd, PTUP_ERR_STATE, seq, 0, "on trial: wait for the confirmation (60 s)") ;
 				break ;
 			}
 			count = get32 (buff + 8) ;
