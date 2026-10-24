@@ -106,9 +106,9 @@ function cssVar(n) { return getComputedStyle(document.documentElement).getProper
 
 function drawSpectrum(s) {
   const cv = $('spec'), ctx = cv.getContext('2d');
-  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = 260;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = 240;
   cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const pad = { l: 34, r: 8, t: 70, b: 22 }, pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+  const pad = { l: 34, r: 8, t: 50, b: 22 }, pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
   // decoded stations only; height = MER, which for a locked DVB-S2 signal is its C/N above the noise
   const pts = (s.stations || []).map((st) => {
     const m = parseFloat(st.mer);
@@ -128,12 +128,6 @@ function drawSpectrum(s) {
     ctx.fillText(`${d}`, 8, y(d) + 4);
   }
   ctx.fillText('MER dB', 4, pad.t - 6);
-  // sweep time per receiver: full pass, of which the AGC2 screen, and how old the last pass is
-  const sw = Object.entries(s.passes || {}).map(([rx, v]) =>
-    `RX${rx} sweep ${(v.time / 1000).toFixed(1)} s (screen ${(v.screen / 1000).toFixed(1)} s, ${v.found} found) · ${Math.round(v.age)} s ago`);
-  ctx.textAlign = 'end';
-  sw.forEach((t, i) => ctx.fillText(t, W - pad.r, 12 + i * 13));
-  ctx.textAlign = 'start';
   // wide symbol rates first, narrow ones on top
   const accent = cssVar('--accent');
   [...pts].sort((a, b) => b.sr - a.sr).forEach((p) => {
@@ -197,5 +191,10 @@ $('stations').addEventListener('click', async (ev) => {
 
 $('watch').addEventListener('click', () => { if (last && last.viewing) startPlayer(last.viewing.freq); });
 $('stop').addEventListener('click', async () => { try { await post('api/stop'); } catch (e) { alert(e.message); } stopPlayer(); });
+
+$('stationlink').addEventListener('click', (ev) => {
+  ev.preventDefault();
+  $('station').hidden = !$('station').hidden;
+});
 
 poll();

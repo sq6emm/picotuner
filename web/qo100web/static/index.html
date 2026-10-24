@@ -13,11 +13,25 @@
   <span class="muted">based on PicoTuner with custom firmware with scanner</span>
   <span id="scaninfo" class="muted"></span>
   <span class="spacer"></span>
+  <a class="repo" href="#station" id="stationlink">Station</a>
   <a class="repo" href="https://github.com/sq6emm/picotuner" target="_blank" rel="noopener">source code on GitHub</a>
 </header>
+<section class="station" id="station" hidden>
+  <img src="static/station.jpg" alt="The 2.4 m dish of SQ6EMM on its az/el rotator" loading="lazy">
+  <div>
+    <h2>Station</h2>
+    <dl>
+      <dt>Antenna</dt><dd>2.4 m prime-focus dish, f/D ≈ 0.40, on a SPID MD-03 az/el rotator (own controller firmware); locator JO81LC</dd>
+      <dt>Feed and LNB</dt><dd>Invacom SNF-031 LNB (LO 9750 MHz) with the ADF-120 corrugated feed for prime-focus dishes (f/D 0.32–0.43)</dd>
+      <dt>Receiver</dt><dd>BATC PicoTuner with a Serit FTS-4334LV NIM (STV0910 demodulator, STV6120 tuner, two receivers) and a WIZnet W5500-EVB-Pico Ethernet module</dd>
+      <dt>Firmware</dt><dd>Own build of the PicoTuneWH firmware (from G4EWJ's 0v3e source) with a band scanner inside the tuner, extra signal readings and updates over Ethernet</dd>
+      <dt>This page</dt><dd>The tuner's scan of the BATC WB bandplan, both receivers while nobody watches; the chosen station re-encoded to 480p, about 400 kb/s</dd>
+    </dl>
+  </div>
+</section>
 
 <section class="spectrum">
-  <canvas id="spec" height="260"></canvas>
+  <canvas id="spec" height="240"></canvas>
   <div class="muted small">Decoded stations; bar height is the MER (about the C/N of a locked signal), width the occupied bandwidth. From the tuner's own scan, not an FFT. Click a station to watch it.</div>
 </section>
 
@@ -46,6 +60,7 @@
     <p class="muted small">Stations found by the tuner's own band scan over the BATC WB bandplan. D: MER above the decoding threshold of the MODCOD. Codecs appear once the scanner has read them from the stream (every 10th pass); Bitrate is the channel's estimated capacity. Video is re-encoded to a small stream (about 400 kb/s) to save bandwidth.</p>
   </section>
 </main>
+
 <script src="static/app.js"></script>
 </body>
 </html>

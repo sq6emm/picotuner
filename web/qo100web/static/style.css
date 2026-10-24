@@ -42,3 +42,12 @@ td.call { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
 td.mer { font-weight: 700; font-size: 15px; }
 .repo { color: var(--accent); text-decoration: none; }
 .repo:hover { text-decoration: underline; }
+
+.station { margin: 16px 16px 0; display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .station { grid-template-columns: 1fr; } }
+.station img { width: 100%; border-radius: 6px; display: block; }
+.station h2 { font-size: 16px; margin: 0 0 8px; }
+.station dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; }
+.station dt { color: var(--muted); font-weight: 600; }
+.station dd { margin: 0; }
+@media (max-width: 600px) { .station dl { grid-template-columns: 1fr; } .station dd { margin-bottom: 6px; } }
