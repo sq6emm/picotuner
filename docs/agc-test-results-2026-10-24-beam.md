@@ -25,3 +25,25 @@ Earlier AGC1-only Sun/Moon results (2026-10-23, 2026-10-24 morning) need repeati
 ## Rotator note
 A command right after a direction change was sometimes ignored (no move for 60 s, the same command
 again moved it in 2 s); scripts now resend after 3 s.
+
+## Correction to the beacon analysis above
+The "shallow null, about 8.5 dB" used AGC2 590 as the noise level, measured at another frequency.
+At the beacon frequency the noise level is about 360, so the nulls before the adjustment were
+close to the noise floor. That point is withdrawn.
+
+## Feed geometry and the first adjustment (2026-10-24, about 12:15)
+Measured: horn aperture (flush with the corrugated flange) 920 mm from the dish centre (focus
+962 mm from photogrammetry). Flange edge to dish outer rim along the struts, seen from behind:
+12 o'clock 136 cm, 8 o'clock 128 cm, 4 o'clock 126.5 cm, i.e. the feed about 64 mm low and
+about 9.5 mm right. Strut lengths 105 / 99.5 (4 o'clock) / 97.5 (8 o'clock) cm agree on the
+vertical offset (top strut 4.3 cm longer than the mean, 4.35 cm predicted), not on left/right.
+Adjustment: all three struts set to 100.7 cm (top -4.3, 4 o'clock +1.2, 8 o'clock +3.2 cm).
+Whether the feed was also moved axially in the clamp: not recorded.
+
+Result: the beam moved down about 2.6 deg and left about 1 deg; QO-100 peak now at rotator
+az 167.9 / el 33.65 (was 169.05 / 31.05), MER 11.0 at the peak as before.
+- el cut: nearly symmetric (MER about 7.5 at -0.8 and +0.6 deg, nulls at about -1.2 and +0.8).
+- az cut: asymmetry reversed: steep to the left (no lock at -1.2), broad to the right
+  (MER 6.9 at +1.2, 5.0 at +1.4). The unequal bottom strut changes moved the feed about
+  1.7-1.9 cm right; next step: 4 o'clock +5.5 mm, 8 o'clock -5.5 mm (about 1 cm left).
+Data: `fw/agc-test/xsec-after1-2026-10-24.csv`, `xsec-after2-2026-10-24.csv`.
