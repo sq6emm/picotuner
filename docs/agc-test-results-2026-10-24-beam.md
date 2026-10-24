@@ -6,7 +6,7 @@ Offsets are on the sky (az offset x cos el). Raw data in `fw/agc-test/` (not com
 `xsec-2026-10-24*.csv`, `sun-lna-xsec-2026-10-24.csv`.
 
 ## QO-100 beacon (RX1, 1500 kS/s), AGC2 as power (noise only: about 590 at 1500 kS/s)
-- Peak AGC2 142, MER 11.0-11.3 dB at az 169.05 / el 31.05 (true QO-100: az 168.55, el 30.85).
+- Peak AGC2 142, MER 11.0-11.3 dB at az 169.05 / el 31.05 (QO-100 computed for the wrong QTH: az 168.55, el 30.85; see the correction at the end).
 - az +: -3 dB near +0.6 deg, null near +0.8 deg (only about 8.5 dB down), sidelobe after +1.0.
 - az -: broad shoulder, about 2.7 dB down at -1.2 deg, no null within the scan.
 - el +: null near +1.0..+1.1 deg; el -: shoulder like az -, no null to -1.2 deg.
@@ -83,7 +83,7 @@ cold-sky reference above the arc.
   then -3 mm); aperture ~950 mm. Azimuth beam symmetric (peak 0.1 deg off the centre of the
   AGC2-185 span, width 2.59 deg rotator at that level, narrowest so far); elevation slightly
   broader downwards.
-- QO-100 peak: rotator az ~169.2-169.3, el ~33.45 (true 168.55 / 30.85). One az centre scan
+- QO-100 peak: rotator az ~169.2-169.3, el ~33.45 (computed for the wrong QTH: 168.55 / 30.85). One az centre scan
   from level crossings: 169.13. Rotator zero (az_pos, el_zero) NOT changed yet; changing el_zero
   by -2.6 also moves the physical place of el_min (-5), so el_min needs moving with it.
 - Sun in the afternoon (az ~220, el ~17, partly behind trees): no response with AGCHOLD=1
@@ -101,3 +101,13 @@ el -0.4: 156, el +0.4: 154, i.e. within about 0.1 deg. The feed-service position
 2026-10-24 (shown -4) is now shown about -6.8. The first move near el_min should be watched.
 Measurements run from the power host (Docker, host network) as the notebook was off the
 station LAN.
+
+## Correction: the station coordinates (2026-10-24 evening)
+All QO-100, Sun and Moon directions above were computed for JO81LC, which is not where the dish
+is. The dish is in JO81QO (height from GPS above the WGS84 ellipsoid, about 175 m above sea
+level). From there QO-100 is at az 169.20, el 30.385 geometric, 30.41 with refraction. So the
+rotator recalibration above (zero set for 168.55 / 30.88) leaves the rotator reading about
+az 0.64 too low and el 0.47 too high; the beam centre in the old rotator angles (169.14 / 33.69)
+means the rotator read az -0.06 and el +3.28 against the sky before that recalibration. The Sun
+pointing of 2026-10-24 was off by a similar amount. Beam shapes, peak shifts and the feed work are
+not affected.

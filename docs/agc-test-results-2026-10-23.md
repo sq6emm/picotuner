@@ -37,7 +37,8 @@ timeouts, progress codes in watchdog scratch registers. Needs one USB install.
 - Beacon MER over az (el 30.44): 168.37 -> 8.0-8.5, 169.08 -> 10.05, 169.59 -> 8.4-8.6, 170.32 no lock.
   Over el (az 169.05): 29.40 no lock, 29.92 -> 4.6, 30.41 -> 9.2, 30.90 -> 10.75, 31.42 -> 10.5.
 - Best QO-100: rotator az 169.05 el 31.05, MER 10.7-10.8 dB, LDPC errors ~30/read (was 210-270 at
-  169.34/30.44, MER 8.7). Computed QO-100 (25.9 E) from JO81LC: az 168.55 el 30.85,
+  169.34/30.44, MER 8.7). Computed QO-100 (25.9 E) from JO81LC, the wrong place (the dish is in JO81QO, where QO-100 is
+  at az 169.20 el 30.41, see the beam notes of 2026-10-24): az 168.55 el 30.85,
   so the rotator reads about az +0.5, el +0.2 deg against the sky.
 
 ## Moon (93 %, 0.53 deg), 10485 MHz, 27 500 kS/s, drift scans
