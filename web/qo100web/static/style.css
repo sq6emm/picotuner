@@ -1,0 +1,38 @@
+:root {
+  --bg: #f6f7f9; --fg: #1b1f24; --muted: #6a737d; --card: #ffffff; --line: #e1e4e8;
+  --accent: #0a66c2; --good: #1a7f37; --warn: #b08800; --bad: #cf222e;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1216; --fg: #e6e8eb; --muted: #8b949e; --card: #171b21; --line: #2a3038;
+          --accent: #4ea1ff; --good: #3fb950; --warn: #d29922; --bad: #f85149; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px;
+         background: var(--card); border-bottom: 1px solid var(--line); }
+h1 { font-size: 18px; margin: 0; }
+.spacer { flex: 1; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; padding: 16px; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+.videobox { position: relative; background: #000; aspect-ratio: 16 / 9; border-radius: 6px; overflow: hidden; }
+video { width: 100%; height: 100%; display: block; }
+.overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+           justify-content: center; text-align: center; color: #ddd; padding: 16px; }
+.now { margin-top: 10px; }
+.buttons { margin-top: 8px; display: flex; gap: 8px; align-items: center; }
+button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit; }
+button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); padding: 3px 8px; }
+button:disabled { opacity: .5; cursor: default; }
+input { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.login { display: flex; gap: 6px; }
+.list { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+tr.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.mer-good { color: var(--good); } .mer-mid { color: var(--warn); } .mer-low { color: var(--bad); }
+.bar { display: inline-block; width: 60px; height: 8px; background: var(--line); border-radius: 4px; vertical-align: middle; }
+.bar > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }

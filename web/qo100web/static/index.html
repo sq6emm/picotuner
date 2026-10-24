@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QO-100 WB Monitor</title>
+<link rel="stylesheet" href="static/style.css">
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>QO-100 WB Monitor</h1>
+  <span id="scaninfo" class="muted"></span>
+  <span class="spacer"></span>
+  <form id="login" class="login" hidden>
+    <input id="pw" type="password" placeholder="password" autocomplete="current-password">
+    <button type="submit">Log in</button>
+  </form>
+  <span id="logged" class="muted" hidden>control enabled · <a href="#" id="logout">log out</a></span>
+</header>
+
+<main>
+  <section class="player">
+    <div class="videobox">
+      <video id="video" controls muted playsinline></video>
+      <div id="novideo" class="overlay">Nothing on air from this receiver.<br><span class="muted">Pick a station from the list.</span></div>
+    </div>
+    <div class="now">
+      <div><b id="nowname">—</b> <span id="nowfreq" class="muted"></span></div>
+      <div id="nowinfo" class="muted"></div>
+      <div class="buttons">
+        <button id="watch" hidden>Watch</button>
+        <button id="stop" hidden>Stop</button>
+        <span id="viewers" class="muted"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="list">
+    <table>
+      <thead><tr><th>Freq (MHz)</th><th>SR</th><th>Callsign</th><th>MER</th><th>Mode</th><th>Level</th><th>Seen</th><th></th></tr></thead>
+      <tbody id="stations"><tr><td colspan="8" class="muted">Scanning…</td></tr></tbody>
+    </table>
+    <p class="muted small">Stations found by the tuner's own band scan over the BATC WB bandplan. Video is re-encoded to a small stream (about 400 kb/s) to save bandwidth.</p>
+  </section>
+</main>
+<script src="static/app.js"></script>
+</body>
+</html>
