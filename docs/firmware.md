@@ -1,4 +1,4 @@
-# PicoTuneWH 0v3e-ota14 (own build)
+# PicoTuneWH 0v3e-ota15 (own build)
 
 G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picotunewh/`, plus:
 
@@ -69,6 +69,10 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
    next tune command without `AGCHOLD=1` releases it; `$38` bit 7 = held; the `AGCMS=` stream adds
    `vgo=` (the LNA detector reading, which keeps changing while held) and `hold=`.
    Beacon at the peak / 5 deg above the arc: AGC2 149 / 366 automatic, 150 / 465 held.
+
+10. **Codecs in scan reports (0v3e-ota15)**: `[from@wh:SCAN]` lines end with `video=` (H262, H264,
+    H265, H266) and `audio=` (MPA, AAC, AC3) from the station's TS, empty until the TS has shown
+    them (so mostly on the passes that hold for the service name); cleared at every scan retune.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):
