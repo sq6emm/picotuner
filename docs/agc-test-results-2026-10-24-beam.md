@@ -88,3 +88,16 @@ cold-sky reference above the arc.
   by -2.6 also moves the physical place of el_min (-5), so el_min needs moving with it.
 - Sun in the afternoon (az ~220, el ~17, partly behind trees): no response with AGCHOLD=1
   at 1500 kS/s; at 27.5 MS/s AGC2 does not respond at all (do not use 27.5 MS/s for this).
+
+## Rotator recalibrated on the new beam centre (2026-10-24 ~16:40)
+Beam centre from AGC2-180 level crossings, both scan directions: rotator az 169.14 (169.13 and
+169.15), el 33.69 (33.70 and 33.67). True QO-100: az 168.55, el 30.85 geometric, 30.88 with
+refraction; the rotator read az +0.59, el +2.81 too much. Applied via `\set_conf` (approved by
+the owner), saved and the controller rebooted: az_pos 168.60 (dish at rest 0.05 east of the
+centre), tilt_dir 58.149 -> 57.559, el_zero 6.980 -> 4.17, and, to keep the same physical
+positions, el_min -5 -> -7.8, el_max 80 -> 77.2, park_el 0 -> -2.8, service_el 60 -> 57.2.
+Check at the true QO-100 position: centre AGC2 149 (MER 10.3), az -0.4: 149, az +0.4: 152,
+el -0.4: 156, el +0.4: 154, i.e. within about 0.1 deg. The feed-service position used on
+2026-10-24 (shown -4) is now shown about -6.8. The first move near el_min should be watched.
+Measurements run from the power host (Docker, host network) as the notebook was off the
+station LAN.
