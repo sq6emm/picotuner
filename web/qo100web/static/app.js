@@ -109,11 +109,10 @@ function drawSpectrum(s) {
   const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = 260;
   cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const pad = { l: 34, r: 8, t: 70, b: 22 }, pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
-  // only decoded stations: the level of their own channel and symbol rate from the last scan
-  const all = s.spectrum || [];
+  // decoded stations only; height = MER, which for a locked DVB-S2 signal is its C/N above the noise
   const pts = (s.stations || []).map((st) => {
-    const p = all.find((q) => q.f === st.freq && q.sr === st.srate);
-    return { f: st.freq, sr: st.srate, db: p ? Math.max(1, p.db) : 1 };
+    const m = parseFloat(st.mer);
+    return { f: st.freq, sr: st.srate, db: isNaN(m) ? 0.5 : Math.max(0.5, m) };
   });
   const top = 15;                                   // fixed scale
   const x = (f) => pad.l + (f - F0) / (F1 - F0) * pw, y = (db) => pad.t + ph - Math.max(0, db) / top * ph;
@@ -128,7 +127,7 @@ function drawSpectrum(s) {
     ctx.beginPath(); ctx.moveTo(pad.l, y(d) + .5); ctx.lineTo(pad.l + pw, y(d) + .5); ctx.stroke();
     ctx.fillText(`${d}`, 8, y(d) + 4);
   }
-  ctx.fillText('dB', 8, pad.t - 6);
+  ctx.fillText('MER dB', 4, pad.t - 6);
   // sweep time per receiver: full pass, of which the AGC2 screen, and how old the last pass is
   const sw = Object.entries(s.passes || {}).map(([rx, v]) =>
     `RX${rx} sweep ${(v.time / 1000).toFixed(1)} s (screen ${(v.screen / 1000).toFixed(1)} s, ${v.found} found) · ${Math.round(v.age)} s ago`);
@@ -147,8 +146,8 @@ function drawSpectrum(s) {
   // station labels like the BATC monitor: callsign and MER above the signal
   specHits = [];
   (s.stations || []).forEach((st) => {
-    const near = pts.filter((p) => Math.abs(p.f - st.freq) <= 10 && p.sr === st.srate)[0];
-    const lvl = Math.min(top, near ? near.db : 2);
+    const near = pts.find((p) => p.f === st.freq && p.sr === st.srate);
+    const lvl = Math.min(top, near ? near.db : 0.5);
     const on = s.viewing && s.viewing.freq === st.freq;
     const cx = x(st.freq), cy = y(lvl) - 6;
     ctx.fillStyle = on ? cssVar('--good') : cssVar('--fg');
