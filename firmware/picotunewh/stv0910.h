@@ -75,6 +75,7 @@
 	uint8_t stv0910_read_lock_flags					(uint8_t, bool, uint32_t*);
 	uint8_t stv0910_read_packet_errors				(uint8_t, uint32_t*);
 	uint8_t stv0910_reset_packet_errors				(uint8_t);
+	uint8_t stv0910_hold_agc1						(uint8_t, bool);
 	uint8_t stv0910_read_err_rate					(uint8_t, uint32_t*);
 	uint8_t stv0910_read_ber						(uint8_t, uint32_t*);
 	uint8_t stv0910_read_dvbs2_mer					(uint8_t, int32_t*);

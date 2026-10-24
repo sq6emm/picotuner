@@ -1343,3 +1343,13 @@ uint8_t stv0910_reset_packet_errors (uint8_t tunerdemod)
 {
 	return (stv0910_write_reg (tunerdemod == STV_TUNER1_DEMOD2 ? RSTV0910_P2_ERRCTRL2 : RSTV0910_P1_ERRCTRL2, 0xc1)) ;
 }
+
+/* -------------------------------------------------------------------------------------------------- */
+/* hold AGC1 (the I/Q input AGC) where it is: loop gain AGCIQ_BETA 0; release: back to 1, the value   */
+/* from the register init (AGC1CN 0x99) (0v3e-ota14)                                                  */
+/* -------------------------------------------------------------------------------------------------- */
+
+uint8_t stv0910_hold_agc1 (uint8_t tunerdemod, bool hold)
+{
+	return (stv0910_write_reg_field (tunerdemod == STV_TUNER1_DEMOD2 ? FSTV0910_P2_AGCIQ_BETA : FSTV0910_P1_AGCIQ_BETA, hold ? 0 : 1)) ;
+}

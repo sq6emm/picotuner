@@ -284,3 +284,25 @@ void stvvglna_read_regs (uint8_t addr)
     sprintf (temps ,"\r\n") ;
     lmprint (temps) ;
 }
+
+
+/* -------------------------------------------------------------------------------------------------- */
+/* hold the LNA gain where the AGC has put it (RFAGC mode "auto request": the AGC only moves when an  */
+/* update is requested), or let it track again (fully automatic, as set by stvvglna_init) (0v3e-ota14)*/
+/* -------------------------------------------------------------------------------------------------- */
+
+uint8_t stvvglna_hold (uint8_t input, bool hold)
+{
+    uint8_t 	err ;
+    uint8_t 	val ;
+    uint8_t 	lna_addr = input == NIM_INPUT_TOP ? NIM_LNA_0_ADDR : NIM_LNA_1_ADDR ;
+
+    err = stvvglna_read_reg (lna_addr, STVVGLNA_REG2, &val) ;
+    if (err == ERROR_NONE)
+    {
+    	val &= ~STVVGLNA_REG2_RFAGC_MODE_MASK ;
+    	val |= (hold ? STVVGLNA_REG2_RFAGC_MODE_AUTO_REQUEST : STVVGLNA_REG2_RFAGC_MODE_AUTO_TRACK) << STVVGLNA_REG2_RFAGC_MODE_SHIFT ;
+    	err = stvvglna_write_reg (lna_addr, STVVGLNA_REG2, val) ;
+    }
+    return (err) ;
+}

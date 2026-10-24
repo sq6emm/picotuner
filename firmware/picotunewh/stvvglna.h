@@ -44,6 +44,7 @@
 	#define NIM_LNA_1_ADDR      STVVGLNA_I2C_ADDR0
 
 	uint8_t stvvglna_read_agc	(uint8_t, uint8_t *, uint8_t*) ;
+	uint8_t stvvglna_hold		(uint8_t, bool) ;
 	uint8_t stvvglna_init		(uint8_t, uint8_t,  bool*) ;
 	void 	stvvglna_read_regs 	(uint8_t) ;
 #endif

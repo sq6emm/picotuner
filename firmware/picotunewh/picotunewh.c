@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota13"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota14"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -4212,6 +4212,19 @@ static	int32	agcms [MAXRECEIVERS+1] ;
 static	uint32	agcthen [MAXRECEIVERS+1] ;
 static	int32	agcpending ;
 
+// Fixed gain (0v3e-ota14): AGCHOLD=1 in a tune command holds the LNA (STVVGLNA, shared by the
+// receivers on that input) and AGC1 of the receiver AGCHOLDMS after the tune, once the loops have
+// settled. AGC2 and the power registers then follow the antenna power (power ~ 1/AGC2^2) instead
+// of being normalised by the front end, for Sun/Moon noise and beam measurements. The next tune
+// command for the receiver without AGCHOLD=1 releases it. $38 bit 7 = held.
+
+#define	AGCHOLDMS			1500
+
+enum { HOLD_OFF, HOLD_PENDING, HOLD_ON } ;
+static	int		agchold [MAXRECEIVERS+1] ;
+static	uint32	agcholdat [MAXRECEIVERS+1] ;
+static	int		agcholdpending ;
+
 
 // parse "1,2,3" or "start-stop/step" at *ppos (advanced past it); returns the count
 
@@ -4303,6 +4316,12 @@ static void scan_parse (char *command, int32 *freqx, int32 *srx)
 	{
 		scanpending.waitms = atoi (pos + strlen ("SCANMS=")) ;
 	}
+	agcholdpending = 0 ;
+	pos = strstr (command, "AGCHOLD=") ;
+	if (pos)
+	{
+		agcholdpending = atoi (pos + strlen ("AGCHOLD=")) == 1 ;
+	}
 	agcpending = 0 ;
 	pos = strstr (command, "AGCMS=") ;
 	if (pos)
@@ -4390,6 +4409,18 @@ static void scan_command_done (int rx, int good, int32 freqx)
 		return ;
 	}
 	agcms [rx] = (good && freqx != 0) ? agcpending : 0 ;
+	if (agchold [rx] == HOLD_ON)										// any new command: release first
+	{
+		GLOBALNIM = rcv[rx].nim ;
+		stvvglna_hold (rcv[rx].antenna == 2 ? NIM_INPUT_BOTTOM : NIM_INPUT_TOP, false) ;
+		stv0910_hold_agc1 (rcv[rx].nimreceiver, false) ;
+	}
+	agchold [rx] = HOLD_OFF ;
+	if (good && freqx != 0 && agcholdpending)
+	{
+		agchold [rx]   = HOLD_PENDING ;									// held by agc_poll once settled
+		agcholdat [rx] = monotime_ms() + AGCHOLDMS ;
+	}
 	if (good && freqx != 0 && scanpending.nf && scanpending.nsr)
 	{
 		scans [rx] = scanpending ;
@@ -4669,10 +4700,22 @@ static void agc_poll (void)
 	uint8	power_i ;
 	uint8	power_q ;
 	uint8	state ;
+	uint8	lna_gain ;
+	uint8	vgo ;
 	char	temps [128] ;
 
 	for (rx = 1 ; rx <= MAXRECEIVERS ; rx++)
 	{
+		if (agchold [rx] == HOLD_PENDING && rcv[rx].active && (int32) (monotime_ms() - agcholdat [rx]) >= 0)
+		{
+			GLOBALNIM = rcv[rx].nim ;
+			if (rcv[rx].xlnaexists)
+			{
+				stvvglna_hold (rcv[rx].antenna == 2 ? NIM_INPUT_BOTTOM : NIM_INPUT_TOP, true) ;
+			}
+			stv0910_hold_agc1 (rcv[rx].nimreceiver, true) ;
+			agchold [rx] = HOLD_ON ;
+		}
 		if (agcms [rx] == 0 || !rcv[rx].active)
 		{
 			continue ;
@@ -4694,10 +4737,15 @@ static void agc_poll (void)
 		{
 			continue ;
 		}
+		vgo = 255 ;
+		if (rcv[rx].xlnaexists && stvvglna_read_agc (rcv[rx].antenna == 2 ? NIM_INPUT_BOTTOM : NIM_INPUT_TOP, &lna_gain, &vgo) != ERROR_NONE)
+		{
+			vgo = 255 ;
+		}
 		sprintf
 		(
-			temps, "[from@wh:AGC] rx=%d t=%u agc1=%u agc2=%u pi=%u pq=%u state=%u\r\n",
-			rx + rxbase, (unsigned) now, agc1, agc2, power_i, power_q, state
+			temps, "[from@wh:AGC] rx=%d t=%u agc1=%u agc2=%u pi=%u pq=%u state=%u vgo=%u hold=%d\r\n",
+			rx + rxbase, (unsigned) now, agc1, agc2, power_i, power_q, state, vgo, agchold [rx] == HOLD_ON
 		) ;
 		while (xsr10.status == 1) ;									// wait for core 0 to deal with the last request
 		strcpy ((char*) xsr10.buffer, temps) ;
@@ -6014,6 +6062,10 @@ static	uint32			counter ;
 					y = STATUS_LOCK_FLAGS ;														// parameter 38, also while searching
 					if (stv0910_read_lock_flags (rcv[rx].nimreceiver, !locked_s, &value) == ERROR_NONE)
 					{
+						if (agchold [rx] == HOLD_ON)
+						{
+							value |= 128 ;												// gain held (AGCHOLD=1)
+						}
 						rcv[rx].rawinfos[y] = value ;
 						sprintf (rcv[rx].textinfos[y], "%d", value) ;
 					}

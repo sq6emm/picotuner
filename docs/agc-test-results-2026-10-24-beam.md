@@ -69,3 +69,11 @@ is not sensitive to it in this range.
 Azimuth cut at ~950 mm, el 33.7: peak AGC2 143 at rotator az 168.0; steep on the low-azimuth side
 (194 at 167.0, 252 at 166.7); plateau 148-152 from 168.6 to 169.4, falling only beyond 169.6.
 Next: lateral test, strut 8 o'clock +6 mm, 4 o'clock -6 mm (feed ~1 cm right seen from behind).
+
+## The AGC2 noise reference was wrong (found 2026-10-24 ~15:15)
+AGC2 is normalised by the LNA AGC and AGC1, which follow the total LNB power. The "noise 3 deg off
+in azimuth" reference used for the noise/peak figures points at another satellite (very probably
+Astra 2 at 28.2E, about 2.3 deg along the arc): there the automatic LNA VGO reads 4, on QO-100 15,
+on cold sky 31. The noise/peak figures (7.85-8.01 dB) and the transponder hump test are withdrawn.
+Beam shapes from MER and the peak shifts stand. From ota14 on, measurements use AGCHOLD=1 and a
+cold-sky reference above the arc.

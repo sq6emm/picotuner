@@ -1,4 +1,4 @@
-# PicoTuneWH 0v3e-ota13 (own build)
+# PicoTuneWH 0v3e-ota14 (own build)
 
 G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picotunewh/`, plus:
 
@@ -60,6 +60,15 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
    wait. The pass line carries `screen=`, `candidates=` and all AGC2 readings. On 2026-10-24,
    with `tools/qo100scan.py --rx 1,2` (plan split over both receivers) and an empty band, a pass
    took 2.1-2.3 s (median); before, 54 s for the narrow channels alone.
+
+9. **Fixed gain (0v3e-ota14)**: `AGCHOLD=1` in a tune command holds the STVVGLNA gain (RFAGC mode
+   "auto request"; the LNA is shared by both receivers on that input) and AGC1 (`AGCIQ_BETA` 0)
+   1.5 s after the tune. Without it the front end normalises the total LNB power, so AGC2 is only
+   the channel's share of it (pointing at the geostationary arc, with strong TV satellites next to
+   QO-100, lowers the LNA gain). Held, AGC2 and the power registers follow the antenna power. The
+   next tune command without `AGCHOLD=1` releases it; `$38` bit 7 = held; the `AGCMS=` stream adds
+   `vgo=` (the LNA detector reading, which keeps changing while held) and `hold=`.
+   Beacon at the peak / 5 deg above the arc: AGC2 149 / 366 automatic, 150 / 465 held.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):
