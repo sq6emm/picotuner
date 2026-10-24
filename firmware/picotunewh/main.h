@@ -82,6 +82,10 @@
 #define STATUS_AUDIO_TYPE		  34		// 0x03=MP2, 0x0f=AAC
 #define STATUS_AGC1_GAIN		  35		// STV0910 AGCIQIN1:AGCIQIN0 (LongMynd $26), valid without a lock
 #define STATUS_AGC2_GAIN		  36		// STV0910 AGC2I1:AGC2I0 (LongMynd $27)
+#define STATUS_NOISE			  37		// raw noise estimate, NNOSPLHT (S2) / NNOSDATAT (S): falls as C/N rises
+#define STATUS_LOCK_FLAGS		  38		// bit0 carrier, bits1-2 timing quality, bit3 demod, bit4 FEC, bit5 TS, bit6 ADC overload
+#define STATUS_PACKET_ERRORS	  39		// bad TS packets since the lock (error counter 2)
+#define STATUS_CONSTELLATION	  40		// 15 symbols as hex IIQQ pairs (signed bytes)
 
 #define STATUS_VGX_STATE		  86		// voltage generator state
 #define STATUS_VGY_STATE		  87		// voltage generator state

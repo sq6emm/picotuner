@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota11"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota12"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -1880,6 +1880,7 @@ void mainloop()
 			{
 				printf ("BASE IP PORT command has been received \r\n") ;
 				printf ("Pico is rebooting\r\n\r\n") ;
+				ota_planned_reboot () ;
 				watchdog_reboot (0, 0, 200) ;
 				while (1) ;
 			}
@@ -1895,6 +1896,7 @@ void mainloop()
 			{
 				printf ("REBOOT command has been received \r\n") ;
 				printf ("Pico is rebooting\r\n\r\n") ;
+				ota_planned_reboot () ;
 				watchdog_reboot (0, 0, 200) ;
 				while (1) ;
     		}
@@ -1902,6 +1904,7 @@ void mainloop()
 			{
 				printf ("RESET command has been received \r\n") ;
 				printf ("Pico is rebooting\r\n\r\n") ;
+				ota_planned_reboot () ;
 				watchdog_reboot (0, 0, 200) ;
 				while (1) ;
     		}
@@ -4164,6 +4167,19 @@ typedef struct
 static	scan_t	scans [MAXRECEIVERS+1] ;
 static	scan_t	scanpending ;						// parsed from the command being processed
 
+// Fast signal levels (0v3e-ota12): AGCMS=n (20..1000) in a tune command sends, every n ms,
+//   [from@wh:AGC] rx=2 t=ms agc1=36071 agc2=144 pi=146 pq=145 state=2
+// to base port + PORTAGC (9906), for antenna scans (Sun, Moon) faster than the 500 ms status.
+// The next tune command for the receiver without AGCMS= stops it.
+
+#define	PORTAGC				6
+#define	AGCMSMIN			20
+#define	AGCMSMAX			1000
+
+static	int32	agcms [MAXRECEIVERS+1] ;
+static	uint32	agcthen [MAXRECEIVERS+1] ;
+static	int32	agcpending ;
+
 
 // parse "1,2,3" or "start-stop/step" after key; returns the count
 
@@ -4228,6 +4244,20 @@ static void scan_parse (char *command, int32 *freqx, int32 *srx)
 	{
 		scanpending.waitms = atoi (pos + strlen ("SCANMS=")) ;
 	}
+	agcpending = 0 ;
+	pos = strstr (command, "AGCMS=") ;
+	if (pos)
+	{
+		agcpending = atoi (pos + strlen ("AGCMS=")) ;
+		if (agcpending < AGCMSMIN)
+		{
+			agcpending = AGCMSMIN ;
+		}
+		else if (agcpending > AGCMSMAX)
+		{
+			agcpending = AGCMSMAX ;
+		}
+	}
 	if (scanpending.nf == 0)
 	{
 		return ;
@@ -4256,6 +4286,7 @@ static void scan_command_done (int rx, int good, int32 freqx)
 	{
 		return ;
 	}
+	agcms [rx] = (good && freqx != 0) ? agcpending : 0 ;
 	if (good && freqx != 0 && scanpending.nf && scanpending.nsr)
 	{
 		scans [rx] = scanpending ;
@@ -4369,6 +4400,58 @@ static void scan_report (int rx, scan_t *s)
 }
 
 
+// fast signal levels, called from the Core1 loop
+
+static void agc_poll (void)
+{
+	int		rx ;
+	uint32	now ;
+	uint16	agc1 ;
+	uint16	agc2 ;
+	uint8	power_i ;
+	uint8	power_q ;
+	uint8	state ;
+	char	temps [128] ;
+
+	for (rx = 1 ; rx <= MAXRECEIVERS ; rx++)
+	{
+		if (agcms [rx] == 0 || !rcv[rx].active)
+		{
+			continue ;
+		}
+		now = monotime_ms() ;
+		if (now - agcthen [rx] < (uint32) agcms [rx])
+		{
+			continue ;
+		}
+		agcthen [rx] = now ;
+		GLOBALNIM = rcv[rx].nim ;
+		if
+		(
+			stv0910_read_agc1_gain (rcv[rx].nimreceiver, &agc1) != ERROR_NONE ||
+			stv0910_read_agc2_gain (rcv[rx].nimreceiver, &agc2) != ERROR_NONE ||
+			stv0910_read_power (rcv[rx].nimreceiver, &power_i, &power_q) != ERROR_NONE ||
+			stv0910_read_scan_state (rcv[rx].nimreceiver, &state) != ERROR_NONE
+		)
+		{
+			continue ;
+		}
+		sprintf
+		(
+			temps, "[from@wh:AGC] rx=%d t=%u agc1=%u agc2=%u pi=%u pq=%u state=%u\r\n",
+			rx + rxbase, (unsigned) now, agc1, agc2, power_i, power_q, state
+		) ;
+		while (xsr10.status == 1) ;									// wait for core 0 to deal with the last request
+		strcpy ((char*) xsr10.buffer, temps) ;
+		xsr10.length 	= strlen (temps) + 1 ;
+		xsr10.port 		= baseipport + PORTAGC ;
+		xsr10.typex 	= GENINFOREC ;
+		xsr10.receiver	= rx ;
+		xsr10.status	= 1 ;
+	}
+}
+
+
 // called from the Core1 loop
 
 static void scan_poll (void)
@@ -4433,8 +4516,21 @@ static void scan_poll (void)
 			case SCAN_HOLD:
 				if (now - s->t0 >= SCANHOLDMS)
 				{
-					scan_report (rx, s) ;
-					scan_next (rx, s, 1) ;
+					GLOBALNIM = rcv[rx].nim ;								// still locked? A short lock that has
+					if 														// gone is not reported (seen 2026-10-24)
+					(
+						stv0910_read_scan_state (rcv[rx].nimreceiver, &state) == ERROR_NONE &&
+						(state == STATE_DEMOD_S2 || state == STATE_DEMOD_S) &&
+						(rcv[rx].scanstate == STATE_DEMOD_S2 || rcv[rx].scanstate == STATE_DEMOD_S)
+					)
+					{
+						scan_report (rx, s) ;
+						scan_next (rx, s, 1) ;
+					}
+					else
+					{
+						scan_next (rx, s, 0) ;
+					}
 				}
 				break ;
 		}
@@ -5136,6 +5232,7 @@ void core1_main()
 		}																//   the command has been processed
 		ota_trace (1, 0x07) ;
 		scan_poll() ;													// band scan, if one is running
+		agc_poll() ;													// fast signal levels, if asked for
 	}
 }	
 
@@ -5310,6 +5407,7 @@ static	uint32			counter ;
 							rcv[rx].rawinfos[STATUS_VLCSTOPS] = rcv[rx].vlcstopcount ;
 						}               
 						rcv[rx].signalacquiredtime = monotime_ms() ;				// signal first acquired
+						stv0910_reset_packet_errors (rcv[rx].nimreceiver) ;			// count bad packets from this lock on
 						rcv[rx].signallosttime    = 0 ;								// clear the lost time
 						rcv[rx].packetcountrx = 0 ;									// clear null packet count
 						rcv[rx].nullpacketcountrx = 0 ;								// clear null packet count
@@ -5552,6 +5650,11 @@ static	uint32			counter ;
 					{
 						rcv[rx].textinfos[STATUS_BER][0] = 0 ;
 					}
+					if (!locked_s && !locked_s2)
+					{
+						rcv[rx].textinfos[STATUS_NOISE][0] 		   = 0 ;
+						rcv[rx].textinfos[STATUS_PACKET_ERRORS][0] = 0 ;
+					}
 
 					if (stv0910_read_constellation (rcv[rx].nimreceiver, &sym_i, &sym_q) == ERROR_NONE)
 					{
@@ -5559,6 +5662,44 @@ static	uint32			counter ;
 						sprintf (rcv[rx].textinfos[STATUS_CONSTELLATION_I], "%d", (int8_t) sym_i) ;
 						rcv[rx].rawinfos[STATUS_CONSTELLATION_Q] = (int8_t) sym_q ;				// parameter 8
 						sprintf (rcv[rx].textinfos[STATUS_CONSTELLATION_Q], "%d", (int8_t) sym_q) ;
+					}
+
+					y = STATUS_CONSTELLATION ;													// parameter 40: a burst of symbols
+					rcv[rx].textinfos[y][0] = 0 ;
+					for (z = 0 ; z < 15 ; z++)
+					{
+						if (stv0910_read_constellation (rcv[rx].nimreceiver, &sym_i, &sym_q) != ERROR_NONE)
+						{
+							break ;
+						}
+						sprintf (rcv[rx].textinfos[y] + 4 * z, "%02X%02X", sym_i, sym_q) ;
+					}
+					rcv[rx].rawinfos[y] = z ;
+
+					y = STATUS_LOCK_FLAGS ;														// parameter 38, also while searching
+					if (stv0910_read_lock_flags (rcv[rx].nimreceiver, !locked_s, &value) == ERROR_NONE)
+					{
+						rcv[rx].rawinfos[y] = value ;
+						sprintf (rcv[rx].textinfos[y], "%d", value) ;
+					}
+
+					if (locked_s || locked_s2)
+					{
+						uint16	noise ;
+
+						y = STATUS_NOISE ;														// parameter 37
+						if (stv0910_read_noise (rcv[rx].nimreceiver, locked_s2, &noise) == ERROR_NONE)
+						{
+							rcv[rx].rawinfos[y] = noise ;
+							sprintf (rcv[rx].textinfos[y], "%d", noise) ;
+						}
+
+						y = STATUS_PACKET_ERRORS ;												// parameter 39
+						if (stv0910_read_packet_errors (rcv[rx].nimreceiver, &value) == ERROR_NONE)
+						{
+							rcv[rx].rawinfos[y] = value ;
+							sprintf (rcv[rx].textinfos[y], "%d", value) ;
+						}
 					}
 
 					y = STATUS_DEBUG0 ;															// parameter 28: TSSTATUS2:TSSTATUS

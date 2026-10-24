@@ -42,7 +42,7 @@
 #define OTA_MARK_MAGIC			0x0da70000u			// in watchdog scratch[0] with a step number
 
 enum { MARK_IDLE, MARK_PAUSE_WAIT, MARK_PARKED, MARK_ERASE, MARK_PROGRAM, MARK_RELEASED, MARK_PAUSE_TIMEOUT,
-	   MARK_FLASH_DONE, MARK_IRQ_ON, MARK_XIP_SAME, MARK_XIP_FAR } ;
+	   MARK_FLASH_DONE, MARK_IRQ_ON, MARK_XIP_SAME, MARK_XIP_FAR, MARK_PLANNED_REBOOT } ;
 
 extern char 	__flash_binary_end ;
 
@@ -99,6 +99,10 @@ void ota_init (int after_watchdog, void (*hook) (void), void (*ts) (int stop))
 {
 	uint32_t	value = watchdog_hw->scratch[0] ;
 
+	if (value == (OTA_MARK_MAGIC | MARK_PLANNED_REBOOT))
+	{
+		after_watchdog = 0 ;									// our own reboot (command, update), not a hang
+	}
 	after_wd = after_watchdog ;
 	if (after_watchdog && (value & 0xffff0000u) == OTA_MARK_MAGIC && (value & 0xffff) != MARK_IDLE)
 	{
@@ -116,6 +120,14 @@ void ota_init (int after_watchdog, void (*hook) (void), void (*ts) (int stop))
 	idle_hook = hook ;
 	ts_hook   = ts ;
 	mark (MARK_IDLE) ;
+}
+
+
+// called just before a deliberate watchdog_reboot(), so the next start does not report a hang
+
+void ota_planned_reboot (void)
+{
+	mark (MARK_PLANNED_REBOOT) ;
 }
 
 

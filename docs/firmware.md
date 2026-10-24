@@ -1,4 +1,4 @@
-# PicoTuneWH 0v3e-ota11 (own build)
+# PicoTuneWH 0v3e-ota12 (own build)
 
 G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picotunewh/`, plus:
 
@@ -38,6 +38,17 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
    (Core1 heartbeat); trace points in watchdog scratch 0-3, shown by `ptupdate.py --info` after a
    watchdog reset; GP23 high (3V3 regulator in PWM mode). `$11` BER only for DVB-S, `$23` fixed.
    Details: `docs/agc-test-results-2026-10-23.md`.
+
+7. **More demodulator data (0v3e-ota12)**: `$37` raw noise estimate (NNOSPLHT in DVB-S2, NNOSDATAT
+   in DVB-S; falls as C/N rises, about 3850 at MER 11.3 dB), `$38` lock flags (bit 0 carrier,
+   bits 1-2 timing quality, bit 3 demodulator, bit 4 FEC, bit 5 TS, bit 6 ADC overload; 63 = all
+   locked), `$39` bad TS packets since the lock (error counter 2, reset at each new lock), `$40`
+   15 constellation symbols as hex `IIQQ` pairs (signed bytes) per status cycle.
+   `AGCMS=n` (20..1000) in a tune command streams `[from@wh:AGC] rx= t= agc1= agc2= pi= pq= state=`
+   every n ms to port 9906 (base + 6) for antenna scans; the next command without it stops it.
+   The scanner reports a station only if it is still locked after the hold time. Deliberate
+   reboots (command, update) are marked, so `--info` reports only real watchdog resets.
+   C/N in dB is not computed in the firmware: the known tables are GPL-2.0-only (dddvb).
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):

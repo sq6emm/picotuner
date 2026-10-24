@@ -1241,3 +1241,105 @@ uint8_t stv0910_init_regs()
 
     return (err) ;
 }
+
+/* -------------------------------------------------------------------------------------------------- */
+/* raw noise estimate: NNOSPLHT (DVB-S2, on the PL headers) or NNOSDATAT (DVB-S, on the data);        */
+/* smaller is better, it falls as C/N rises (0v3e-ota12)                                              */
+/* -------------------------------------------------------------------------------------------------- */
+
+uint8_t stv0910_read_noise (uint8_t tunerdemod, bool dvbs2, uint16_t *noise)
+{
+    uint8_t 	err ;
+    uint8_t 	high, low ;
+    uint16_t	reg1, reg0 ;
+
+	if (dvbs2)
+	{
+		reg1 = tunerdemod == STV_TUNER1_DEMOD2 ? RSTV0910_P2_NNOSPLHT1 : RSTV0910_P1_NNOSPLHT1 ;
+		reg0 = tunerdemod == STV_TUNER1_DEMOD2 ? RSTV0910_P2_NNOSPLHT0 : RSTV0910_P1_NNOSPLHT0 ;
+	}
+	else
+	{
+		reg1 = tunerdemod == STV_TUNER1_DEMOD2 ? RSTV0910_P2_NNOSDATAT1 : RSTV0910_P1_NNOSDATAT1 ;
+		reg0 = tunerdemod == STV_TUNER1_DEMOD2 ? RSTV0910_P2_NNOSDATAT0 : RSTV0910_P1_NNOSDATAT0 ;
+	}
+	err = stv0910_read_reg (reg1, &high) ;
+	if (err == ERROR_NONE)
+	{
+		err = stv0910_read_reg (reg0, &low) ;
+	}
+	if (err == ERROR_NONE)
+	{
+		*noise = (uint16_t) high << 8 | low ;
+	}
+    return (err) ;
+}
+
+/* -------------------------------------------------------------------------------------------------- */
+/* lock flags (0v3e-ota12):                                                                           */
+/*   bit 0 carrier lock (DSTATUS.CAR_LOCK)       bits 1-2 timing lock quality (DSTATUS.TMGLOCK_QUALITY)*/
+/*   bit 3 demodulator lock (LOCK_DEFINITIF)     bit 4 FEC lock (PKTDELIN_LOCK in S2, LOCKEDVIT in S) */
+/*   bit 5 TS FIFO line ok (TSSTATUS.TSFIFO_LINEOK)  bit 6 ADC overload (DSTATUS.OVADC_DETECT)         */
+/* -------------------------------------------------------------------------------------------------- */
+
+uint8_t stv0910_read_lock_flags (uint8_t tunerdemod, bool dvbs2, uint32_t *flags)
+{
+    uint8_t 	err ;
+    uint8_t 	dstatus, fec, ts ;
+    bool		p2 = tunerdemod == STV_TUNER1_DEMOD2 ;
+
+	err = stv0910_read_reg (p2 ? RSTV0910_P2_DSTATUS : RSTV0910_P1_DSTATUS, &dstatus) ;
+	if (err == ERROR_NONE)
+	{
+		if (dvbs2)
+		{
+			err = stv0910_read_reg (p2 ? RSTV0910_P2_PDELSTATUS1 : RSTV0910_P1_PDELSTATUS1, &fec) ;
+			fec = (fec & 0x02) != 0 ;
+		}
+		else
+		{
+			err = stv0910_read_reg (p2 ? RSTV0910_P2_VSTATUSVIT : RSTV0910_P1_VSTATUSVIT, &fec) ;
+			fec = (fec & 0x08) != 0 ;
+		}
+	}
+	if (err == ERROR_NONE)
+	{
+		err = stv0910_read_reg (p2 ? RSTV0910_P2_TSSTATUS : RSTV0910_P1_TSSTATUS, &ts) ;
+	}
+	if (err == ERROR_NONE)
+	{
+		*flags = ((dstatus >> 7) & 1)			// carrier
+			   | ((dstatus >> 5) & 3) << 1		// timing quality (bits 6-5)
+			   | ((dstatus >> 3) & 1) << 3		// demodulator
+			   | fec << 4
+			   | ((ts >> 7) & 1) << 5			// TS line ok
+			   | (dstatus & 1) << 6 ;			// ADC overload
+	}
+    return (err) ;
+}
+
+/* -------------------------------------------------------------------------------------------------- */
+/* bad TS packets counted by error counter 2 (ERRCTRL2 = 0xc1 from the register init), and its reset  */
+/* (rewriting ERRCTRL2 clears the count); used from the first lock on a frequency (0v3e-ota12)       */
+/* -------------------------------------------------------------------------------------------------- */
+
+uint8_t stv0910_read_packet_errors (uint8_t tunerdemod, uint32_t *count)
+{
+    uint8_t 	err ;
+    uint8_t 	b2, b1, b0 ;
+    bool		p2 = tunerdemod == STV_TUNER1_DEMOD2 ;
+
+	err = stv0910_read_reg (p2 ? RSTV0910_P2_ERRCNT22 : RSTV0910_P1_ERRCNT22, &b2) ;
+	if (err == ERROR_NONE) err = stv0910_read_reg (p2 ? RSTV0910_P2_ERRCNT21 : RSTV0910_P1_ERRCNT21, &b1) ;
+	if (err == ERROR_NONE) err = stv0910_read_reg (p2 ? RSTV0910_P2_ERRCNT20 : RSTV0910_P1_ERRCNT20, &b0) ;
+	if (err == ERROR_NONE)
+	{
+		*count = (uint32_t) (b2 & 0x7f) << 16 | (uint32_t) b1 << 8 | b0 ;
+	}
+    return (err) ;
+}
+
+uint8_t stv0910_reset_packet_errors (uint8_t tunerdemod)
+{
+	return (stv0910_write_reg (tunerdemod == STV_TUNER1_DEMOD2 ? RSTV0910_P2_ERRCTRL2 : RSTV0910_P1_ERRCTRL2, 0xc1)) ;
+}
