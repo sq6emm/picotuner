@@ -11,20 +11,15 @@ async function post(url, body) {
   return r.json();
 }
 
-function merClass(m) {
-  const v = parseFloat(m);
+function dClass(d) {
+  // colour by D, the margin above the MODCOD's decoding threshold
+  const v = parseFloat(d);
   if (isNaN(v)) return '';
-  return v >= 6 ? 'mer-good' : v >= 3 ? 'mer-mid' : 'mer-low';
+  return v >= 2 ? 'mer-good' : v >= 0.5 ? 'mer-mid' : 'mer-low';
 }
-
-function level(agc2, srate) {
-  // AGC2 is the in-channel gain: lower = stronger. Rough bar against the empty-channel level.
-  const a = parseInt(agc2, 10);
-  if (isNaN(a)) return '';
-  const noise = srate >= 1000 ? 590 : 220;
-  const pct = Math.max(5, Math.min(100, Math.round(100 * (1 - a / noise) * 1.6)));
-  return `<span class="bar" title="AGC2 ${a}"><i style="width:${pct}%"></i></span>`;
-}
+function dText(d) { const v = parseFloat(d); return isNaN(v) ? '' : (v > 0 ? '+' : '') + v.toFixed(1); }
+function codecs(st) { return [st.video, st.audio].filter(Boolean).join(' / '); }
+function kbps(v) { return v == null ? '' : v >= 1000 ? (v / 1000).toFixed(2) + ' Mb/s' : v + ' kb/s'; }
 
 function render(s) {
   last = s;
@@ -35,16 +30,27 @@ function render(s) {
     const on = s.viewing && s.viewing.freq === st.freq;
     const btn = `<button class="ghost" data-f="${st.freq}" data-s="${st.srate}">${on ? 'On' : 'Watch'}</button>`;
     return `<tr class="${on ? 'on' : ''}"><td>${(st.freq / 1000).toFixed(3)}</td><td>${st.srate}</td>` +
-      `<td class="call" title="${escapeHtml(st.name || '')}">${escapeHtml(st.name || '')}</td><td class="${merClass(st.mer)}">${st.mer || ''}</td>` +
-      `<td>${escapeHtml(st.modcod || '')}</td><td>${level(st.agc2, st.srate)}</td><td>${Math.round(st.age)} s</td><td>${btn}</td></tr>`;
+      `<td class="call" title="${escapeHtml(st.name || '')}">${escapeHtml(st.name || '')}</td>` +
+      `<td class="mer ${dClass(st.d)}">${st.mer || ''}</td><td class="${dClass(st.d)}">${dText(st.d)}</td>` +
+      `<td>${escapeHtml(st.modcod || '')}</td><td>${escapeHtml(codecs(st))}</td>` +
+      `<td title="estimated channel capacity">${st.capacity ? '≈' + kbps(st.capacity) : ''}</td>` +
+      `<td>${Math.round(st.age)} s</td><td>${btn}</td></tr>`;
   });
-  $('stations').innerHTML = rows.length ? rows.join('') : '<tr><td colspan="8" class="muted">No stations found yet…</td></tr>';
+  $('stations').innerHTML = rows.length ? rows.join('') : '<tr><td colspan="10" class="muted">No stations found yet…</td></tr>';
 
   const rx1 = s.rx1 || {};
   if (s.viewing) {
     $('nowname').textContent = rx1.name || 'tuning…';
     $('nowfreq').textContent = `${(s.viewing.freq / 1000).toFixed(3)} MHz · ${s.viewing.srate} kS/s`;
-    $('nowinfo').textContent = [rx1.state, rx1.mer ? `MER ${rx1.mer} dB` : '', rx1.modcod].filter(Boolean).join(' · ');
+    const d = rx1.d !== '' && rx1.d != null ? rx1.d : null;
+    $('nowinfo').innerHTML = [
+      escapeHtml(rx1.state || ''),
+      rx1.mer ? `<b class="${dClass(d)}">MER ${escapeHtml(rx1.mer)} dB</b>` : '',
+      d != null ? `<span class="${dClass(d)}">D ${dText(d)}</span>` : '',
+      escapeHtml(rx1.modcod || ''),
+      escapeHtml([rx1.video, rx1.audio].filter(Boolean).join(' / ')),
+      rx1.tsrate != null ? `TS ${kbps(rx1.tsrate)}` + (rx1.useful != null ? ` (${kbps(rx1.useful)} without null packets)` : '') : '',
+    ].filter(Boolean).join(' · ');
   } else {
     $('nowname').textContent = '—';
     $('nowfreq').textContent = '';
@@ -99,16 +105,16 @@ function cssVar(n) { return getComputedStyle(document.documentElement).getProper
 
 function drawSpectrum(s) {
   const cv = $('spec'), ctx = cv.getContext('2d');
-  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = 220;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = 260;
   cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const pad = { l: 34, r: 8, t: 44, b: 22 }, pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+  const pad = { l: 34, r: 8, t: 70, b: 22 }, pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
   // only decoded stations: the level of their own channel and symbol rate from the last scan
   const all = s.spectrum || [];
   const pts = (s.stations || []).map((st) => {
     const p = all.find((q) => q.f === st.freq && q.sr === st.srate);
     return { f: st.freq, sr: st.srate, db: p ? Math.max(1, p.db) : 1 };
   });
-  const top = Math.max(12, Math.ceil(Math.max(0, ...pts.map((p) => p.db)) / 2) * 2 + 2);
+  const top = 15;                                   // fixed scale
   const x = (f) => pad.l + (f - F0) / (F1 - F0) * pw, y = (db) => pad.t + ph - Math.max(0, db) / top * ph;
   ctx.clearRect(0, 0, W, H);
   ctx.font = '11px system-ui'; ctx.lineWidth = 1;
@@ -117,7 +123,7 @@ function drawSpectrum(s) {
     ctx.beginPath(); ctx.moveTo(x(f) + .5, pad.t); ctx.lineTo(x(f) + .5, pad.t + ph); ctx.stroke();
     if ((f - 10490000) % 1000 === 0) ctx.fillText((f / 1000).toFixed(0), x(f) - 16, H - 6);
   }
-  for (let d = 0; d <= top; d += 4) {
+  for (let d = 0; d <= top; d += 5) {
     ctx.beginPath(); ctx.moveTo(pad.l, y(d) + .5); ctx.lineTo(pad.l + pw, y(d) + .5); ctx.stroke();
     ctx.fillText(`${d}`, 8, y(d) + 4);
   }
@@ -141,15 +147,19 @@ function drawSpectrum(s) {
   specHits = [];
   (s.stations || []).forEach((st) => {
     const near = pts.filter((p) => Math.abs(p.f - st.freq) <= 10 && p.sr === st.srate)[0];
-    const lvl = near ? near.db : 2;
+    const lvl = Math.min(top, near ? near.db : 2);
     const on = s.viewing && s.viewing.freq === st.freq;
     const cx = x(st.freq), cy = y(lvl) - 6;
     ctx.fillStyle = on ? cssVar('--good') : cssVar('--fg');
     ctx.textAlign = 'center';
     ctx.font = (on ? 'bold ' : '') + '12px system-ui';
-    ctx.fillText(st.name || `${(st.freq / 1000).toFixed(2)}`, cx, Math.max(12, cy - 12));
+    ctx.fillText(st.name || `${(st.freq / 1000).toFixed(2)}`, cx, Math.max(12, cy - 26));
+    const dc = dClass(st.d);
+    ctx.font = 'bold 13px system-ui';
+    ctx.fillStyle = dc === 'mer-good' ? cssVar('--good') : dc === 'mer-mid' ? cssVar('--warn') : dc === 'mer-low' ? cssVar('--bad') : cssVar('--fg');
+    ctx.fillText(`MER ${st.mer || '?'}` + (st.d != null ? `  D ${dText(st.d)}` : ''), cx, Math.max(26, cy - 12));
     ctx.font = '11px system-ui'; ctx.fillStyle = cssVar('--muted');
-    ctx.fillText(`${st.mer || '?'} dB · ${st.srate}`, cx, Math.max(24, cy));
+    ctx.fillText([`${st.srate} kS`, codecs(st)].filter(Boolean).join(' · '), cx, Math.max(38, cy));
     ctx.textAlign = 'start';
     specHits.push({ x0: x(st.freq - st.srate * 0.7), x1: x(st.freq + st.srate * 0.7), st });
   });

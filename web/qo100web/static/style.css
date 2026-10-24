@@ -15,7 +15,7 @@ h1 { font-size: 18px; margin: 0; }
 .spacer { flex: 1; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
-main { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; padding: 16px; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 16px; padding: 16px; }
 @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
 section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
 .videobox { position: relative; background: #000; aspect-ratio: 16 / 9; border-radius: 6px; overflow: hidden; }
@@ -34,10 +34,11 @@ th, td { text-align: left; padding: 6px 5px; border-bottom: 1px solid var(--line
 th { color: var(--muted); font-weight: 600; font-size: 12px; }
 tr.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .mer-good { color: var(--good); } .mer-mid { color: var(--warn); } .mer-low { color: var(--bad); }
-.bar { display: inline-block; width: 60px; height: 8px; background: var(--line); border-radius: 4px; vertical-align: middle; }
-.bar > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
 
 .spectrum { margin: 16px 16px 0; }
 #spec { width: 100%; display: block; }
 #spec { cursor: crosshair; }
 td.call { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+td.mer { font-weight: 700; font-size: 15px; }
+.repo { color: var(--accent); text-decoration: none; }
+.repo:hover { text-decoration: underline; }

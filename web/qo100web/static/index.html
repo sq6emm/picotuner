@@ -13,10 +13,11 @@
   <span class="muted">based on PicoTuner with custom firmware with scanner</span>
   <span id="scaninfo" class="muted"></span>
   <span class="spacer"></span>
+  <a class="repo" href="https://github.com/sq6emm/picotuner" target="_blank" rel="noopener">source code on GitHub</a>
 </header>
 
 <section class="spectrum">
-  <canvas id="spec" height="220"></canvas>
+  <canvas id="spec" height="260"></canvas>
   <div class="muted small">Decoded stations at their relative level from the tuner's channel scan (AGC2 of the station's channel), not an FFT. Click a station to watch it.</div>
 </section>
 
@@ -39,10 +40,10 @@
 
   <section class="list">
     <table>
-      <thead><tr><th>Freq (MHz)</th><th>SR</th><th>Callsign</th><th>MER</th><th>Mode</th><th>Level</th><th>Seen</th><th></th></tr></thead>
-      <tbody id="stations"><tr><td colspan="8" class="muted">Scanning…</td></tr></tbody>
+      <thead><tr><th>Freq (MHz)</th><th>SR</th><th>Callsign</th><th>MER</th><th title="MER above the decoding threshold of the MODCOD">D</th><th>Mode</th><th>Codecs</th><th title="estimated channel capacity">Bitrate</th><th>Seen</th><th></th></tr></thead>
+      <tbody id="stations"><tr><td colspan="10" class="muted">Scanning…</td></tr></tbody>
     </table>
-    <p class="muted small">Stations found by the tuner's own band scan over the BATC WB bandplan. Video is re-encoded to a small stream (about 400 kb/s) to save bandwidth.</p>
+    <p class="muted small">Stations found by the tuner's own band scan over the BATC WB bandplan. D: MER above the decoding threshold of the MODCOD. Codecs appear once the scanner has read them from the stream (every 10th pass); Bitrate is the channel's estimated capacity. Video is re-encoded to a small stream (about 400 kb/s) to save bandwidth.</p>
   </section>
 </main>
 <script src="static/app.js"></script>

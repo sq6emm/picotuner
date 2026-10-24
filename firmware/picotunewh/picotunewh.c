@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota14"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota15"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -4136,7 +4136,8 @@ volatile	uint32			thenms ;
 //   in from the TS; the other passes report the last name seen on that frequency.
 // Results go as text lines to base port + PORTSCAN (9905) of the commanding address:
 //   [from@wh:SCAN] rx=2 freq=10494750 srate=1000 state=DVB-S2 mer=8.3 modcod=QPSK 2/3 lock=640
-//                  name=... provider=... agc1=... agc2=...
+//                  name=... provider=... agc1=... agc2=... video=H265 audio=AAC (0v3e-ota15; empty
+//                  until the TS has shown them, so mostly on the passes that collect names)
 //   [from@wh:SCANPASS] rx=2 pass=n found=k time=ms screen=ms candidates=c
 // The scan repeats until the next tune command for that receiver (freq=0 switches it off).
 //   SCANF=10492750-10499250/500 or SCANF=10493250,10494750,10496250   frequencies in kHz (max 48)
@@ -4476,6 +4477,10 @@ static void scan_tune (int rx, int32 freq, int32 sr)
 	rcv[rx].signallosttime 	= 0 ;
 	rcv[rx].textinfos[STATUS_SERVICE_NAME][0] 			= 0 ;
 	rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME][0] 	= 0 ;
+	rcv[rx].textinfos[STATUS_VIDEO_TYPE][0] 			= 0 ;			// codecs come from this station's TS
+	rcv[rx].textinfos[STATUS_AUDIO_TYPE][0] 			= 0 ;
+	rcv[rx].rawinfos[STATUS_VIDEO_TYPE] 				= 0 ;
+	rcv[rx].rawinfos[STATUS_AUDIO_TYPE] 				= 0 ;
 	sprintf (rcv[rx].textinfos[STATUS_FREQ_REQUESTED], "%.3f", (float) freq / 1000) ;
 
 	calibrated = rcv[rx].qo100locerror && rcv[rx].qo100mode != QO100NO ;
@@ -4673,10 +4678,11 @@ static void scan_report (int rx, scan_t *s, uint8 state)
 	snprintf
 	(
 		temps, sizeof(temps),
-		"[from@wh:SCAN] rx=%d freq=%d srate=%d state=%s mer=%s modcod=%s lock=%u name=%s provider=%s agc1=%u agc2=%u\r\n",
+		"[from@wh:SCAN] rx=%d freq=%d srate=%d state=%s mer=%s modcod=%s lock=%u name=%s provider=%s agc1=%u agc2=%u video=%s audio=%s\r\n",
 		rx + rxbase, s->f[s->fi], s->sr[s->si], state == STATE_DEMOD_S2 ? "DVB-S2" : "DVB-S",
 		mer, modcod, (unsigned) s->tlock, s->names [s->fi],
-		rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME], agc1, s->agc2 [s->fi][s->si]
+		rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME], agc1, s->agc2 [s->fi][s->si],
+		rcv[rx].textinfos[STATUS_VIDEO_TYPE], rcv[rx].textinfos[STATUS_AUDIO_TYPE]
 	) ;
 	scan_send (rx, temps) ;
 	s->missed [s->fi] &= ~(1 << s->si) ;

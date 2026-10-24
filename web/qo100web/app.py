@@ -140,6 +140,11 @@ class ScanProtocol(asyncio.DatagramProtocol):
                 if name:
                     st['name'] = name
                     st['provider'] = fields_between(line, ' provider=', ' agc1=').strip()
+                for k in ('video', 'audio'):                 # ota15+, known once the TS showed them
+                    if kv.get(k):
+                        st[k] = kv[k]
+                st['d'] = decode_margin(st['mer'], st['modcod'])
+                st['capacity'] = capacity_kbps(st['srate'], st['modcod'], st['state'])
                 st.setdefault('first', time.time())
                 S.stations[freq] = st
             elif line.startswith('[from@wh:SCANPASS]'):
@@ -172,6 +177,37 @@ def spectrum_from_pass(rx, dump):
     S.spectrum[rx] = {'points': sorted(pts, key=lambda p: (p['f'], -p['sr'])), 'at': time.time()}
 
 
+# MER needed to decode each MODCOD (tenths of dB), as in the firmware's modinfo tables
+MIN_MER_S2 = {'QPSK 1/4': -23, 'QPSK 1/3': -12, 'QPSK 2/5': -3, 'QPSK 1/2': 10, 'QPSK 3/5': 22,
+              'QPSK 2/3': 31, 'QPSK 3/4': 40, 'QPSK 4/5': 47, 'QPSK 5/6': 52, 'QPSK 8/9': 62,
+              'QPSK 9/10': 64, '8PSK 3/5': 55, '8PSK 2/3': 66, '8PSK 3/4': 79, '8PSK 5/6': 94,
+              '8PSK 8/9': 107, '8PSK 9/10': 110, '16APSK 2/3': 90, '16APSK 3/4': 102,
+              '16APSK 4/5': 110, '16APSK 5/6': 116, '16APSK 8/9': 129, '16APSK 9/10': 131,
+              '32APSK 3/4': 127, '32APSK 4/5': 136, '32APSK 5/6': 143, '32APSK 8/9': 157,
+              '32APSK 9/10': 160}
+
+
+def decode_margin(mer, modcod):
+    """D: MER above the decoding threshold of the MODCOD, dB (the firmware's $30 for one receiver)."""
+    try:
+        return round(float(mer) - MIN_MER_S2[modcod] / 10, 1)
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def capacity_kbps(srate, modcod, state):
+    """Rough TS capacity of the channel from SR and MODCOD: DVB-S2 bits per symbol x code rate x
+    about 0.95 framing (headers, pilots); DVB-S x 188/204 (Reed-Solomon)."""
+    try:
+        mod, rate = modcod.split()
+        a, b = rate.split('/')
+        bits = {'QPSK': 2, '8PSK': 3, '16APSK': 4, '32APSK': 5}[mod]
+        eff = 188 / 204 if state == 'DVB-S' else 0.95
+        return int(srate * bits * int(a) / int(b) * eff)
+    except (ValueError, KeyError, AttributeError):
+        return None
+
+
 class StatusProtocol(asyncio.DatagramProtocol):
     def datagram_received(self, data, addr):
         d = {}
@@ -181,10 +217,26 @@ class StatusProtocol(asyncio.DatagramProtocol):
                 d[k] = v
         rx = int(d.get('0', 0) or 0)
         if rx in S.status:
-            S.status[rx] = {'state': d.get('1', ''), 'mer': d.get('12', ''), 'name': d.get('13', ''),
-                            'provider': d.get('14', ''), 'modcod': d.get('18', ''), 'freq': d.get('6', ''),
-                            'srate': d.get('9', ''), 'video': d.get('31', ''), 'lock': d.get('38', ''),
-                            'pkterr': d.get('39', ''), 'at': time.time()}
+            now, prev = time.time(), S.status[rx]
+            st = {'state': d.get('1', ''), 'mer': d.get('12', ''), 'name': d.get('13', ''),
+                  'provider': d.get('14', ''), 'modcod': d.get('18', ''), 'freq': d.get('6', ''),
+                  'srate': d.get('9', ''), 'video': d.get('31', ''), 'audio': d.get('34', ''),
+                  'd': d.get('30', ''), 'null': d.get('15', ''), 'lock': d.get('38', ''),
+                  'pkterr': d.get('39', ''), 'at': now}
+            # measured TS bitrate from the tuner's received packet count ($91), over >= 4 s
+            try:
+                pk = int(d.get('91', ''))
+            except ValueError:
+                pk = None
+            base = prev.get('base')
+            if pk is None or base is None or pk < base[1]:
+                st['base'], st['tsrate'] = (now, pk) if pk is not None else None, None
+            elif now - base[0] >= 4:
+                st['tsrate'] = int((pk - base[1]) * 188 * 8 / (now - base[0]) / 1000)
+                st['base'] = (now, pk)
+            else:
+                st['base'], st['tsrate'] = base, prev.get('tsrate')
+            S.status[rx] = st
 
 
 # ---------------------------------------------------------------------------------------------
@@ -287,6 +339,18 @@ def dedupe(stations):
     return keep
 
 
+def rx1_view(now):
+    st = S.status[1]
+    if now - st.get('at', 0) >= 10:
+        return {}
+    out = {k: v for k, v in st.items() if k != 'base'}
+    try:
+        out['useful'] = int(st['tsrate'] * (1 - float(st['null']) / 100)) if st.get('tsrate') is not None else None
+    except (ValueError, TypeError):
+        out['useful'] = None
+    return out
+
+
 async def api_state(request):
     cid = request.query.get('id', '')[:40]
     if cid and request.query.get('watching') == '1':
@@ -298,7 +362,7 @@ async def api_state(request):
         'stations': [{**s, 'age': round(now - s['seen'], 1)} for s in stations],
         'viewing': S.viewing,
         'video': S.viewing is not None and (HLS_DIR / 'index.m3u8').exists(),
-        'rx1': S.status[1] if now - S.status[1].get('at', 0) < 10 else {},
+        'rx1': rx1_view(now),
         'passes': {k: {**v, 'age': round(now - v['at'], 1)} for k, v in S.passes.items() if v and now - v['at'] < 60},
         'spectrum': [p for sp in S.spectrum.values() if sp and now - sp['at'] < 60 for p in sp['points']],
         'viewers': len(S.viewers),
