@@ -116,3 +116,24 @@ Rotator corrected the same evening (owner's OK): at rest on QO-100 az_pos += 0.6
 56.73 (physical positions unchanged), saved, controller rebooted. Check at the true QO-100
 direction 169.20 / 30.41: centre AGC2 144 (MER 10.5), az -0.4: 144, az +0.4: 146, el -0.4: 150,
 el +0.4: 149. The feed-service position is now shown about el -7.3.
+
+## Evening: held-gain measurements (2026-10-24, after the rotator correction)
+- Moon (97 %, el 41 deg), RX2 at 10501 MHz, 1500 kS/s, AGCHOLD set on cold sky 5 deg beside it:
+  clearly detected but small: AGC2 1.5-2.6 % lower and power I ~2.6 % higher on the Moon, i.e.
+  ~0.1-0.25 dB. Published 10 GHz values: 85 cm 0.18-0.3 dB, ~1 m 0.2-0.25 dB, 3 m 1.2-1.6 dB, so a
+  2.4 m dish with a 0.3 dB LNB should show roughly 0.9-1.2 dB.
+- Beam width on the beacon, AGCHOLD on the peak, power = 1/AGC2^2 minus the cold-sky level, cuts
+  at 0.08 deg steps in both directions, track_tolerance 0.03 for the measurement:
+  az -3 dB 1.61 / 1.63 deg (-0.61 .. +1.00, asymmetric), el 1.27 / 1.29 deg; -10 dB 2.2-2.5 deg.
+  Theory for 2.4 m with a -10 dB edge taper: ~0.77 deg. The earlier MER-based cuts agree
+  (-3 dB at ~0.6-0.9 deg off axis).
+- So the dish works like ~1.4 m: several dB of gain missing. The axial test with the clamp
+  (938 / 950 mm) does NOT rule out defocus: its noise/peak figures came from un-held AGC2 with a
+  reference on another satellite. Prime suspects: defocus (the 962 mm focus is photogrammetric,
+  the ADF-120 phase centre unknown), then the ADF-120 ring setting (now flush), then the surface.
+- Next visit: move the feed in larger steps (-30 / 0 / +30 mm, with the struts) and take a
+  held-gain azimuth cut at each; narrowest beam and highest peak = focus. Then the ADF-120 rings
+  (0 / +2 / +4 mm protrusion). Keep each tuner session from the notebook under 15 minutes (the
+  firmware switches an off-net receiver off after 15 minutes).
+- LNB oscillator: the beacon is at 741.958 MHz IF (LO 458 kHz low); a few days earlier ~0.95 MHz.
+  Fits a DRO (one unsourced forum post says DRO); a 24 h log would settle it.
