@@ -54,6 +54,11 @@
 /*  return: error code                                                                                */
 /* -------------------------------------------------------------------------------------------------- */
 
+// LNA gain held by stvvglna_hold() (index 1 = top input, 2 = bottom), see there
+static bool		held 	  [3] ;
+static uint8_t	held_gain [3] ;
+static uint8_t	held_vgo  [3] ;
+
 uint8_t stvvglna_init (uint8_t input, uint8_t state, bool *lna_ok) 
 {
     uint8_t 	err ;
@@ -194,6 +199,13 @@ uint8_t stvvglna_read_agc(uint8_t input, uint8_t *gain, uint8_t *vgo)
     uint16_t 	timeout	=	0	;
     uint8_t 	status ;
 
+	if (held [input == NIM_INPUT_TOP ? 1 : 2])								// held: a GETAGC request would clear
+	{																		// the forced VGO (0v3e-ota19)
+		*gain = held_gain [input == NIM_INPUT_TOP ? 1 : 2] ;
+		*vgo  = held_vgo  [input == NIM_INPUT_TOP ? 1 : 2] ;
+		return (ERROR_NONE) ;
+	}
+
 /* first we decide which LNA to use */
 
     if (input == NIM_INPUT_TOP) 
@@ -287,22 +299,74 @@ void stvvglna_read_regs (uint8_t addr)
 
 
 /* -------------------------------------------------------------------------------------------------- */
-/* hold the LNA gain where the AGC has put it (RFAGC mode "auto request": the AGC only moves when an  */
-/* update is requested), or let it track again (fully automatic, as set by stvvglna_init) (0v3e-ota14)*/
+/* hold the LNA gain where the AGC has put it, or let it track again (0v3e-ota14, reworked in ota19):  */
+/* "auto request" mode alone did not hold (2026-10-24: VGO followed the band power while "held"), and */
+/* every stvvglna_read_agc() writes GETAGC_START to REG1, which also clears a forced VGO. So: read   */
+/* the gain curve and VGO once, force them (REG1 GETOFF = VGO[4:0], REG3 SWLNAGAIN, REG2 "auto      */
+/* request"), and answer reads from the stored values while held. Release = the stvvglna_init setup. */
 /* -------------------------------------------------------------------------------------------------- */
 
-uint8_t stvvglna_hold (uint8_t input, bool hold)
+uint8_t stvvglna_hold (uint8_t input, uint8_t hold)			// 0 release, 1 forced VGO, 2 fixed max, 3 fixed min gain
 {
-    uint8_t 	err ;
+    uint8_t 	err = ERROR_NONE ;
     uint8_t 	val ;
+    uint8_t 	gain = 0 ;
+    uint8_t 	vgo = 0 ;
     uint8_t 	lna_addr = input == NIM_INPUT_TOP ? NIM_LNA_0_ADDR : NIM_LNA_1_ADDR ;
+    uint8_t 	in = input == NIM_INPUT_TOP ? 1 : 2 ;
 
-    err = stvvglna_read_reg (lna_addr, STVVGLNA_REG2, &val) ;
-    if (err == ERROR_NONE)
-    {
-    	val &= ~STVVGLNA_REG2_RFAGC_MODE_MASK ;
-    	val |= (hold ? STVVGLNA_REG2_RFAGC_MODE_AUTO_REQUEST : STVVGLNA_REG2_RFAGC_MODE_AUTO_TRACK) << STVVGLNA_REG2_RFAGC_MODE_SHIFT ;
-    	err = stvvglna_write_reg (lna_addr, STVVGLNA_REG2, val) ;
-    }
+	if (hold)
+	{
+		if (held [in])
+		{
+			return (ERROR_NONE) ;											// already held: keep the first values
+		}
+		err = stvvglna_read_agc (input, &gain, &vgo) ;						// where the AGC is now
+		if (err == ERROR_NONE)
+		{
+			err = stvvglna_read_reg (lna_addr, STVVGLNA_REG2, &val) ;
+		}
+		if (err == ERROR_NONE)
+		{
+			val &= ~STVVGLNA_REG2_RFAGC_MODE_MASK ;
+			val |= (hold == 2 ? STVVGLNA_REG2_RFAGC_MODE_MAXIMAL_GAIN_INTERNAL :	// 2/3: fixed-gain modes, no AGC
+					hold == 3 ? STVVGLNA_REG2_RFAGC_MODE_MINIMAL_GAIN_INTERNAL :	// loop at all (ota19: forcing
+					STVVGLNA_REG2_RFAGC_MODE_AUTO_REQUEST) << STVVGLNA_REG2_RFAGC_MODE_SHIFT ;	// VGO did not hold)
+			err = stvvglna_write_reg (lna_addr, STVVGLNA_REG2, val) ;
+		}
+		if (err == ERROR_NONE)
+		{
+			err = stvvglna_write_reg
+			(
+				lna_addr, STVVGLNA_REG3,
+				(STVVGLNA_REG3_LCAL_17KHZ            << STVVGLNA_REG3_LCAL_SHIFT)          |
+				(STVVGLNA_REG3_RFAGC_UPDATE_FORCED   << STVVGLNA_REG3_RFAGC_UPDATE_SHIFT)   |
+				(STVVGLNA_REG3_RFAGC_CALSTART_FORCED << STVVGLNA_REG3_RFAGC_CALSTART_SHIFT) |
+				((gain & STVVGLNA_REG3_SWLNAGAIN_MASK) << STVVGLNA_REG3_SWLNAGAIN_SHIFT)
+			) ;
+		}
+		if (err == ERROR_NONE)
+		{
+			err = stvvglna_write_reg
+			(
+				lna_addr, STVVGLNA_REG1,
+				(STVVGLNA_REG1_LNAGC_PWD_POWER_ON << STVVGLNA_REG1_LNAGC_PWD_SHIFT) |
+				(STVVGLNA_REG1_GETOFF_VGO_4_0     << STVVGLNA_REG1_GETOFF_SHIFT)    |
+				(STVVGLNA_REG1_GETAGC_FORCED      << STVVGLNA_REG1_GETAGC_SHIFT)    |
+				(vgo & STVVGLNA_REG1_VGO_MASK)
+			) ;
+		}
+		if (err == ERROR_NONE)
+		{
+			held [in] 	   = true ;
+			held_gain [in] = gain ;
+			held_vgo [in]  = vgo ;
+		}
+	}
+	else
+	{
+		held [in] = false ;
+		err = stvvglna_init (input, STVVGLNA_ON, NULL) ;					// fully automatic again
+	}
     return (err) ;
 }

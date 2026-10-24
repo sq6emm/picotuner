@@ -1,4 +1,4 @@
-# PicoTuneWH 0v3e-ota18 (own build)
+# PicoTuneWH 0v3e-ota19 (own build)
 
 G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picotunewh/`, plus:
 
@@ -111,6 +111,14 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
       `argv`; the unused 512 KiB in the flash layout is documented;
     - I2C at 400 kHz was tried: the NIM then did not work at all (no status, no scan), so the
       bus stays at 100 kHz.
+
+14. **LNA hold that really holds (0v3e-ota19)**: the STVVGLNA kept regulating with `AGCHOLD=1`
+    ("auto request" mode, and also with a forced VGO): pointing from QO-100 to Astra 2 dropped the
+    in-channel power ~4x and ground vs sky gave 0 dB. `AGCHOLD=2` / `AGCHOLD=3` put the LNA in its
+    fixed-gain modes (RFAGC_MODE "maximal" / "minimal gain internal"); with them ground (el -3) vs
+    sky (el 65) gives Y = 4.1 dB at 10.5 and 10.9 GHz, the same in AGC2 and POWERI, no ADC overload.
+    While held the LNA is not polled (a GETAGC request clears a forced VGO); `vgo=` then repeats the
+    value from before the hold. Use `AGCHOLD=2` for measurements.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):

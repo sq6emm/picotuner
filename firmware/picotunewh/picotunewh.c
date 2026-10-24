@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota18"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota19"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -4172,6 +4172,7 @@ enum { HOLD_OFF, HOLD_PENDING, HOLD_ON } ;
 static	int		agchold [MAXRECEIVERS+1] ;
 static	uint32	agcholdat [MAXRECEIVERS+1] ;
 static	int		agcholdpending ;
+static	int		agcholdmode [MAXRECEIVERS+1] ;
 
 
 // parse "1,2,3" or "start-stop/step" at *ppos (advanced past it); returns the count
@@ -4268,7 +4269,11 @@ static void scan_parse (char *command, int32 *freqx, int32 *srx)
 	pos = strstr (command, "AGCHOLD=") ;
 	if (pos)
 	{
-		agcholdpending = atoi (pos + strlen ("AGCHOLD=")) == 1 ;
+		agcholdpending = atoi (pos + strlen ("AGCHOLD=")) ;			// 1 forced VGO, 2 / 3 LNA fixed max / min gain
+		if (agcholdpending < 0 || agcholdpending > 3)
+		{
+			agcholdpending = 0 ;
+		}
 	}
 	agcpending = 0 ;
 	pos = strstr (command, "AGCMS=") ;
@@ -4407,13 +4412,14 @@ static void scan_command_done (int rx, int good, int32 freqx)
 	if (agchold [rx] == HOLD_ON)										// any new command: release first
 	{
 		GLOBALNIM = rcv[rx].nim ;
-		stvvglna_hold (rcv[rx].antenna == 2 ? NIM_INPUT_BOTTOM : NIM_INPUT_TOP, false) ;
+		stvvglna_hold (rcv[rx].antenna == 2 ? NIM_INPUT_BOTTOM : NIM_INPUT_TOP, 0) ;
 		stv0910_hold_agc1 (rcv[rx].nimreceiver, false) ;
 	}
 	agchold [rx] = HOLD_OFF ;
 	if (good && freqx != 0 && agcholdpending)
 	{
 		agchold [rx]   = HOLD_PENDING ;									// held by agc_poll once settled
+		agcholdmode [rx] = agcholdpending ;
 		agcholdat [rx] = monotime_ms() + AGCHOLDMS ;
 	}
 	if (good && freqx != 0)
@@ -4761,7 +4767,7 @@ static void agc_poll (void)
 			GLOBALNIM = rcv[rx].nim ;
 			if (rcv[rx].xlnaexists)
 			{
-				stvvglna_hold (rcv[rx].antenna == 2 ? NIM_INPUT_BOTTOM : NIM_INPUT_TOP, true) ;
+				stvvglna_hold (rcv[rx].antenna == 2 ? NIM_INPUT_BOTTOM : NIM_INPUT_TOP, agcholdmode [rx]) ;
 			}
 			stv0910_hold_agc1 (rcv[rx].nimreceiver, true) ;
 			agchold [rx] = HOLD_ON ;
