@@ -8,6 +8,8 @@ The tuner runs an own build of the PicoTuneWH firmware, made from the published 
 source (GPL v3, see Upstream below).
 
 - `tools/uf2bin.py in.uf2 out.bin` — UF2 to a flat image (base 0x10000000).
+- Ready-made firmware images (W5500 and W5100S, USB first install and Ethernet update):
+  https://github.com/sq6emm/picotuner/releases
 - `firmware/` — own build of G4EWJ's 0v3e source (GPL v3): DHCP option 54, AGC/power/LNA in the
   status, firmware update over Ethernet (`ptboot` bootloader). See `docs/firmware.md`;
   `tools/ptupdate.py` uploads, `tools/uf2pack.py` packs UF2s, `firmware/test/run.sh` tests.

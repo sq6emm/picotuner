@@ -14,7 +14,6 @@ CHANGE_GAP_S (15).
 """
 import asyncio
 import json
-import math
 import os
 import shutil
 import socket
@@ -58,8 +57,6 @@ class State:
         self.mode = None
         self.ffmpeg = None
         self.last_change = 0.0
-        self.plans = {1: None, 2: None}
-        self.spectrum = {1: None, 2: None}   # per receiver: last pass's screen readings
 
 
 S = State()
@@ -70,32 +67,7 @@ def send(text):
     cmd_sock.sendto(text.encode(), (TUNER, BASE + 20))
 
 
-def plan_layout(plan):
-    """Frequency and symbol rate lists in the order the firmware builds them (first seen first),
-    so the AGC2 readings of a pass line can be mapped back to channels."""
-    freqs, srs = plan.split(':')
-    flist, slist, pairs = [], [], set()
-    for fg, sg in zip(freqs.split(';'), srs.split(';')):
-        fl = []
-        for item in fg.split(','):
-            if '-' in item:
-                a, rest = item.split('-')
-                b, step = rest.split('/')
-                fl += list(range(int(a), int(b) + 1, int(step)))
-            else:
-                fl.append(int(item))
-        for f in fl:
-            if f not in flist:
-                flist.append(f)
-            for sr in (int(x) for x in sg.split(',')):
-                if sr not in slist:
-                    slist.append(sr)
-                pairs.add((f, sr))
-    return flist, slist, pairs
-
-
 def scan_cmd(rx, plan):
-    S.plans[rx] = plan
     freqs, srs = plan.split(':')
     send(f'[to@wh] rcv={rx} offset={OFFSET} fplug=A vgx={VGX} scanf={freqs} scansr={srs}')
 
@@ -152,29 +124,6 @@ class ScanProtocol(asyncio.DatagramProtocol):
                 S.passes[rx] = {'time': int(kv.get('time', 0)), 'found': int(kv.get('found', 0)),
                                 'screen': int(kv.get('screen', 0)), 'candidates': int(kv.get('candidates', 0)),
                                 'at': time.time()}
-                if ' agc2=' in line and S.plans.get(rx):
-                    spectrum_from_pass(rx, line.split(' agc2=', 1)[1].strip())
-
-
-def spectrum_from_pass(rx, dump):
-    """AGC2 per channel -> relative level in dB. AGC2 is the in-channel gain (lower = more power),
-    so level = 20 log10(reference / AGC2), the reference being the weakest reading of that symbol
-    rate in the pass (about the noise floor). The front end normalises the total LNB power, so this
-    is a relative picture, good for occupancy, not an absolute measurement."""
-    flist, slist, pairs = plan_layout(S.plans[rx])
-    rows = dump.split(',')
-    if len(rows) != len(flist):
-        return                                           # a pass from the previous plan
-    vals = {}
-    for f, row in zip(flist, rows):
-        for sr, v in zip(slist, row.split('/')):
-            if v.isdigit() and (f, sr) in pairs and int(v) > 0:
-                vals[(f, sr)] = int(v)
-    ref = {}
-    for (f, sr), v in vals.items():
-        ref[sr] = max(ref.get(sr, 0), v)
-    pts = [{'f': f, 'sr': sr, 'db': round(20 * math.log10(ref[sr] / v), 2)} for (f, sr), v in vals.items()]
-    S.spectrum[rx] = {'points': sorted(pts, key=lambda p: (p['f'], -p['sr'])), 'at': time.time()}
 
 
 # MER needed to decode each MODCOD (tenths of dB), as in the firmware's modinfo tables
@@ -288,6 +237,7 @@ async def supervisor():
                 del S.viewers[cid]
         if S.viewers:
             S.last_viewer = now
+        viewed_station(now)
         for f, st in list(S.stations.items()):
             if now - st['seen'] > STATION_TTL_S:
                 del S.stations[f]
@@ -339,6 +289,23 @@ def dedupe(stations):
     return keep
 
 
+def viewed_station(now):
+    """While someone watches, RX2 skips the station RX1 is locked on (firmware 0v3e-ota16), so the list
+    entry for it is kept up to date from RX1's status instead."""
+    v, st = S.viewing, S.status[1]
+    if not v or now - st.get('at', 0) > 5 or st.get('state') not in ('DVB-S2', 'DVB-S'):
+        return
+    e = S.stations.get(v['freq'], {'first': now})
+    e.update(freq=v['freq'], srate=v['srate'], state=st['state'], mer=st['mer'], modcod=st['modcod'],
+             rx=1, seen=now, d=decode_margin(st['mer'], st['modcod']),
+             capacity=capacity_kbps(v['srate'], st['modcod'], st['state']))
+    for k in ('name', 'provider', 'video', 'audio'):
+        if st.get(k):
+            e[k] = st[k]
+    e.setdefault('agc2', '')
+    S.stations[v['freq']] = e
+
+
 def rx1_view(now):
     st = S.status[1]
     if now - st.get('at', 0) >= 10:
@@ -364,7 +331,6 @@ async def api_state(request):
         'video': S.viewing is not None and (HLS_DIR / 'index.m3u8').exists(),
         'rx1': rx1_view(now),
         'passes': {k: {**v, 'age': round(now - v['at'], 1)} for k, v in S.passes.items() if v and now - v['at'] < 60},
-        'spectrum': [p for sp in S.spectrum.values() if sp and now - sp['at'] < 60 for p in sp['points']],
         'viewers': len(S.viewers),
         'mode': S.mode,
     }, headers={'Cache-Control': 'no-store'})

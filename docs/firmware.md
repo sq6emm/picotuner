@@ -1,4 +1,4 @@
-# PicoTuneWH 0v3e-ota15 (own build)
+# PicoTuneWH 0v3e-ota16 (own build)
 
 G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picotunewh/`, plus:
 
@@ -73,6 +73,12 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
 10. **Codecs in scan reports (0v3e-ota15)**: `[from@wh:SCAN]` lines end with `video=` (H262, H264,
     H265, H266) and `audio=` (MPA, AAC, AC3) from the station's TS, empty until the TS has shown
     them (so mostly on the passes that hold for the service name); cleared at every scan retune.
+
+11. **Fewer wasted lock attempts (0v3e-ota16)**: a candidate is skipped when its occupied band
+    overlaps a signal already found (|df| < (SR1 + SR2) x 0.675 kHz, i.e. SR x 1.35 / 2 each),
+    a receiver locked outside a scan (someone watching it) counts as found, and carriers that do
+    not lock are retried every 16th pass. With RX2 scanning the whole plan alone while RX1 shows
+    the beacon, a pass went from 5.5-25.8 s to 2.7-8 s.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):

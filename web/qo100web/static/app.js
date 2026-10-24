@@ -99,7 +99,7 @@ function stopPlayer(keepWatching) {
   if (!keepWatching) watching = false;
 }
 
-// ---- spectrum (relative levels from the scan) ----
+// ---- spectrum of the decoded stations (height = MER) ----
 const F0 = 10490500, F1 = 10499500;        // kHz shown
 let specHits = [];
 function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }

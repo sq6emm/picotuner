@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota15"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota16"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -4159,7 +4159,7 @@ volatile	uint32			thenms ;
 #define	SCANNAMEMS			2500					// hold on the passes that collect service names
 #define	SCANNAMEEVERY		10
 #define	SCANLOCALKHZ		1600					// noise reference window, each side
-#define	SCANMISSEVERY		8
+#define	SCANMISSEVERY		16
 #define	SCANNAMELEN			24
 #define	PORTSCAN			5						// results to base port + 5
 
@@ -4550,6 +4550,19 @@ static void scan_select (scan_t *s)
 
 	s->candidates = 0 ;
 	s->nlock 	  = 0 ;
+	for (fi = 1 ; fi <= MAXRECEIVERS ; fi++)							// a receiver locked outside a scan (someone
+	{																	// watching it) counts as found: its channel
+		if 																// and skirts are not tried again (0v3e-ota16)
+		(
+			&scans [fi] != s && !scans [fi].active && rcv[fi].active &&
+			(rcv[fi].scanstate == STATE_DEMOD_S2 || rcv[fi].scanstate == STATE_DEMOD_S)
+		)
+		{
+			s->lockf  [s->nlock] = rcv[fi].requestedfreq ;
+			s->locksr [s->nlock] = rcv[fi].symbolrates [rcv[fi].srindex] ;
+			s->nlock++ ;
+		}
+	}
 	for (fi = 0 ; fi < s->nf ; fi++)
 	{
 		s->cand [fi] = 0 ;
@@ -4625,9 +4638,9 @@ static int scan_next_candidate (scan_t *s, int locked)
 			{
 				d = -d ;
 			}
-			if (d < (s->locksr [x] * 2) / 3)							// kHz against kS/s: about half the
-			{															// occupied bandwidth
-				break ;
+			if (d < ((s->locksr [x] + s->sr [s->si]) * 675) / 1000)	// the two occupied bands (SR x 1.35,
+			{															// kHz) overlap: the skirt of a found
+				break ;													// signal, not another one (0v3e-ota16)
 			}
 		}
 		if (x == s->nlock)
