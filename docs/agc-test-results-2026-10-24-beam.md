@@ -143,3 +143,21 @@ el +0.4: 149. The feed-service position is now shown about el -7.3.
   power = k / AGC2^2 holds; single points scatter up to ~9 % (AGC1 is re-held at each tune), so
   compare within one hold. The beam widths and the Moon figure above stand: the low gain is the
   antenna, not the readings.
+
+## Night 24/25 Oct: the LNA hold did not hold; repeated with AGCHOLD=2
+- AGCHOLD=1 left the STVVGLNA regulating (see docs/firmware.md, ota19): the held Moon (0.2 dB)
+  and the first hot/cold attempts were compensated. With AGCHOLD=2 (LNA fixed gain):
+  ground (el -3) vs sky (el 65): Y = 4.1 dB at 10.5 and 10.9 GHz (AGC2 and POWERI agree), so the
+  LNB works at 10.5 GHz as in band; T_sys roughly 80-160 K depending on the assumed temperatures.
+- Moon (el 46, AGCHOLD=2): +0.49 dB (AGC2), +0.47 dB (POWERI), 5 on/off cycles. Response width
+  ~0.7 deg in el, ~0.9 deg in az with a +az shoulder. Still below a healthy 2.4 m (~1-1.5 dB).
+- Beacon beam, AGCHOLD=2, cold sky in the same hold (C/N at the peak 16.1 dB; MER only 10.5-11
+  dB, so MER is capped by something else and MER cuts overstate the width):
+  el -3 dB 0.93 / 0.92 deg (-0.52 .. +0.41), -10 dB 1.6 deg: close to theory (0.77-0.85).
+  az -3 dB 1.59 / 1.64 deg (-0.75 .. +0.86), not down to -10 dB at +1.44 deg: about twice too
+  wide, long shoulder towards +az.
+- So: elevation plane fine, azimuth plane broad and asymmetric. Coma from a horizontal feed offset
+  or tilt, or astigmatism of the dish (different focus in the two planes). The earlier "works
+  like 1.4 m" (from AGCHOLD=1 and MER cuts) is withdrawn. Next visit: at several axial feed
+  positions measure the az and el widths separately (different best positions = astigmatism),
+  and check the feed tilt in azimuth.
