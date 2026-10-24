@@ -47,3 +47,25 @@ az 167.9 / el 33.65 (was 169.05 / 31.05), MER 11.0 at the peak as before.
   (MER 6.9 at +1.2, 5.0 at +1.4). The unequal bottom strut changes moved the feed about
   1.7-1.9 cm right; next step: 4 o'clock +5.5 mm, 8 o'clock -5.5 mm (about 1 cm left).
 Data: `fw/agc-test/xsec-after1-2026-10-24.csv`, `xsec-after2-2026-10-24.csv`.
+
+## Second opinion and the axial test (2026-10-24 afternoon)
+A second analysis (Fable) pointed out an azimuth sign error in the notes above: when the peak moves
+to a LOWER rotator azimuth, the beam has moved RIGHT of the dish axis (seen from behind), just as
+a higher rotator elevation means the beam moved down. With that fixed, the strut model (beam
+opposite to the feed shift, about 0.5 deg per cm) and the strut labels agree with adjustments 2
+and 3; adjustment 1 differs because the strut anchors are not symmetric (equal struts do not mean
+a centred feed; the flange-to-rim distances are the better check).
+
+Figure of merit from now on: noise AGC2 (3 deg off) against peak AGC2, measured in one session
+(`fw/agc-test/fom-2026-10-24.txt`). Peak search with 0.2 deg steps: with 0.1 deg steps the 0.08
+deg rotator deadband makes every other step a no-move.
+| state | aperture | peak AGC2 | noise/peak |
+|---|---|---|---|
+| C, clamp 12 mm in | ~938 mm | 146 (MER 11.0) | 7.93 dB |
+| C, clamp back | ~950 mm | 145 | 7.85 dB |
+The 12 mm axial change is within the measurement spread: the feed is near the focus, or the gain
+is not sensitive to it in this range.
+
+Azimuth cut at ~950 mm, el 33.7: peak AGC2 143 at rotator az 168.0; steep on the low-azimuth side
+(194 at 167.0, 252 at 166.7); plateau 148-152 from 168.6 to 169.4, falling only beyond 169.6.
+Next: lateral test, strut 8 o'clock +6 mm, 4 o'clock -6 mm (feed ~1 cm right seen from behind).
