@@ -23,7 +23,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-TUNER = os.environ.get('TUNER', 'TUNER_IP')
+TUNER = os.environ.get('TUNER', '')                 # the tuner's IP address, required
 HTTP_PORT = int(os.environ.get('HTTP_PORT', '8090'))
 BASE = int(os.environ.get('BASE_PORT', '9900'))
 OFFSET = int(os.environ.get('LNB_OFFSET', '9750000'))
@@ -440,6 +440,8 @@ async def static_file(request):
 def main():
     if not shutil.which('ffmpeg'):
         raise SystemExit('ffmpeg not found')
+    if not TUNER:
+        raise SystemExit('set TUNER (the tuner IP address) in .env')
     app = web.Application(middlewares=[app_header])
     # every route also under any prefix, for proxies that pass /picotuner/... through unchanged
     for pre in ('', '/{prefix:.+}'):

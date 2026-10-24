@@ -1,7 +1,7 @@
 """Firmware update for PicoTuneWH (ptwh0v3e-ota) over Ethernet.
 
-    python3 ptupdate.py TUNER_IP picotunewh.bin            # upload, reboot, wait for it
-    python3 ptupdate.py TUNER_IP --info                    # update state only
+    python3 ptupdate.py <tuner> picotunewh.bin            # upload, reboot, wait for it
+    python3 ptupdate.py <tuner> --info                    # update state only
     options: --port 9920 (base port + 20), --key KEY (built in with -DPTUP_KEY)
 
 The image is the application linked for 0x10008000 (picotunewh.bin, or its .uf2). The tuner

@@ -1,6 +1,6 @@
 # First run in the tuner, 2026-10-23 evening
 
-W5500-EVB-Pico module with 0v3e-ota2 in the PicoTuner (FTS-4334LV), at TUNER_IP (no
+W5500-EVB-Pico module with 0v3e-ota2 in the PicoTuner (FTS-4334LV), at <tuner> (no
 reservation; found by sending INFO to the whole /24). Raw CSVs in `fw/agc-test/` (local).
 
 ## Status fields (steps 1-5 of `docs/agc-test.md`)
@@ -31,7 +31,7 @@ connected (core0 prints right after the erase), supply dip during the erase with
 several hundred mA. Fix planned: watchdog, no printf in the update path, cooperative Core1 pause with
 timeouts, progress codes in watchdog scratch registers. Needs one USB install.
 
-## Pointing (SPID MD-03 via rotctld ROTATOR_IP:4533)
+## Pointing (SPID MD-03 via rotctld <rotator>:4533)
 - Smallest move ~0.5 deg (requests of 0.25 deg do nothing). rotctld's reply includes
   `el_inclinometer`, agreeing with the elevation reading.
 - Beacon MER over az (el 30.44): 168.37 -> 8.0-8.5, 169.08 -> 10.05, 169.59 -> 8.4-8.6, 170.32 no lock.

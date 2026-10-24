@@ -1,7 +1,7 @@
 """Band scan with the scanner inside PicoTuneWH 0v3e-ota13 (SCANF= / SCANSR= in a tune command).
 
-    python3 qo100scan.py TUNER_IP                  # QO-100 WB plan on RX2
-    python3 qo100scan.py TUNER_IP --rx 1,2         # the plan split over both receivers
+    python3 qo100scan.py <tuner>                  # QO-100 WB plan on RX2
+    python3 qo100scan.py <tuner> --rx 1,2         # the plan split over both receivers
     python3 qo100scan.py TUNER --group 10491500:1500 --csv found.csv
 
 The default plan follows the BATC QO-100 WB bandplan (wiki.batc.org.uk/QO-100_WB_Bandplan), as in

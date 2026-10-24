@@ -11,7 +11,7 @@ The original module (G4EWJ 0v3g) is the way back: swap it in again.
 
 ## Before the day
 - MAC of the test module: `xx:xx:xx:xx:xx:xx` (host name `PicoTunerWH-XXXXXX`). Give it a DHCP
-  reservation on the tuner's router (e.g. the old TUNER_IP), or read its lease there after
+  reservation on the tuner's router (e.g. the address the old module had), or read its lease there after
   the swap. The 9997 broadcast does not cross the router.
 - No baseline with 0v3g beforehand: the dish has to move to reach the tuner, so the pointing
   changes anyway. 0v3g's beacon MER from the handoff (10.5 dB) is the only reference.
@@ -22,7 +22,7 @@ the receiver over: status and TS go to the machine running it. Re-send your own 
 
 0. **Swap** with the tuner powered off. Power on: green LED "HI" in Morse, then blinking until the
    Ethernet link, then steady once DHCP worked. Check: `python3 tools/ptupdate.py TUNER --info`.
-0b. **Dish back on QO-100** (SPID MD-03, rotctld ROTATOR_IP:4533, every move on your OK).
+0b. **Dish back on QO-100** (SPID MD-03, rotctld <rotator>:4533, every move on your OK).
    Step 1 then shows how well it points: MER near 10.5 dB as before. If it is clearly lower, a
    small az/el raster around the position with step 5's AGC1/MER per point is the next test.
 1. **Beacon, H** (locked, as in the handoff):

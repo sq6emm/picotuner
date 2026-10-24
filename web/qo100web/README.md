@@ -17,7 +17,7 @@ and TS away from the app until its next command (it resends every 4 minutes).
 ## Run
 
 ```sh
-cp .env.example .env      # set TUNER if it is not TUNER_IP
+cp .env.example .env      # set TUNER to the tuner's IP address
 docker compose up -d --build
 ```
 
@@ -31,7 +31,7 @@ page is opened with the trailing slash:
 ```nginx
 location = /qo100 { return 301 /qo100/; }
 location /qo100/ {
-    proxy_pass http://APP_HOST:8090/;   # trailing slash: strips /qo100/
+    proxy_pass http://<app host>:8090/;   # trailing slash: strips /qo100/
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_buffering off;                       # live HLS playlist

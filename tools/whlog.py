@@ -1,6 +1,6 @@
 """Tune a PicoTuneWH receiver and log its status ($n,value on UDP 9901) to CSV.
 
-    python3 whlog.py TUNER_IP --freq 10491500 --srate 1500 --vgx HI --duration 120 --csv beacon.csv
+    python3 whlog.py <tuner> --freq 10491500 --srate 1500 --vgx HI --duration 120 --csv beacon.csv
     python3 whlog.py IP --sweep 10485000:10499000:250 --dwell 3 --csv sweep.csv     # AGC vs frequency
 
 Frequencies in kHz as in [to@wh] commands (offset 9750000 = LNB LO). The tuner sends status and TS to

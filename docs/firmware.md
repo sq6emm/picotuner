@@ -77,8 +77,8 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):
 ```
-rsync -az firmware tools user@build-host:~/work/picotuner/
-ssh user@build-host 'docker run --rm -u $(id -u):$(id -g) -e PTUP_KEY=... \
+rsync -az firmware tools user@<build host>:~/work/picotuner/
+ssh user@<build host> 'docker run --rm -u $(id -u):$(id -g) -e PTUP_KEY=... \
     -v ~/work/picotuner:/w picotuner-build:focal sh /w/tools/build/build.sh'
 ```
 Needs `~/work/picotuner/build/RP2040-HAT-C` (2024-08-08, pico-sdk 1.4.0) and the image from
@@ -93,15 +93,15 @@ model at 0x10000000: install, rollback, a power cut at every flash operation (11
 ## Install, update, way back
 - **First time (USB):** `[to@wh] bootsel=369` to port 9920 (or the BOOTSEL button), then copy
   `picotunewh-full.uf2` to the RPI-RP2 drive.
-- **Updates:** `python3 tools/ptupdate.py TUNER_IP --key KEY picotunewh.bin`
+- **Updates:** `python3 tools/ptupdate.py <tuner> --key KEY picotunewh.bin`
   (`--info` shows the state). ~125 KB, stop-and-wait 1 KiB packets. The tuner reboots; ptboot
   backs up the running app, installs the new one, and the new one confirms itself after 60 s
   with an IP address. Three boots without that → ptboot puts the old one back.
-- **Back to G4EWJ's firmware:** BOOTSEL + copy `fw/orig/xwh0v3g-w5100s.uf2` (it overwrites
+- **Back to G4EWJ's firmware:** BOOTSEL + copy the original UF2 from the BATC wiki (it overwrites
   ptboot; the update metadata left at 0x101f7000 is ignored).
 
 ## Tested on a bare W5100S-EVB-Pico (no NIM), 2026-10-22
-- ptboot → app hand-over, USB CDC log, DHCP (TEST_BOARD_IP from ROUTER_IP), runs with
+- ptboot → app hand-over, USB CDC log, DHCP (an address from the test router), runs with
   "NIM_A could not be initialised" and the built-in QO-100 ini commands.
 - Upload with `ptupdate.py`: 125 KB at 64–67 KiB/s (~2 s), wrong key refused, reboot into trial,
   confirmed after 60 s. Rollback: an image rebooted (`reboot=258`) on each of its 3 trial boots
