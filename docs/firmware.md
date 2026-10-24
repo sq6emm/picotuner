@@ -1,4 +1,4 @@
-# PicoTuneWH 0v3e-ota3 (own build)
+# PicoTuneWH 0v3e-ota11 (own build)
 
 G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picotunewh/`, plus:
 
@@ -31,6 +31,13 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
      must repeat the command within 15 min, as for any tune. `tools/qo100scan.py` does all that.
    - Also fixed: commands longer than 255 characters overflowed `commandrxbuff`.
    Untested on hardware so far: parser checked on the host, builds without warnings.
+
+6. **Update robustness (0v3e-ota4 .. ota11)**: Core1 parks itself in a RAM loop (not inlined:
+   `__no_inline_not_in_flash_func`) while Core0 erases/programs, every wait bounded; TS capture off
+   for an update session; no printf in the update path; 8 s watchdog fed only while both cores run
+   (Core1 heartbeat); trace points in watchdog scratch 0-3, shown by `ptupdate.py --info` after a
+   watchdog reset; GP23 high (3V3 regulator in PWM mode). `$11` BER only for DVB-S, `$23` fixed.
+   Details: `docs/agc-test-results-2026-10-23.md`.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):

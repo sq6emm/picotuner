@@ -60,3 +60,18 @@ timeouts, progress codes in watchdog scratch registers. Needs one USB install.
   ON-OFF AGC1 = +30.7, +50.9, +25.2, +47.1, mean +38.5 +-5.4 (se). Same size as the second drift scan,
   so the Moon is detected and the pointing was not the limit: AGC1 changes only ~40 units for it.
   AGC2 shows nothing. The Sun has to set the AGC1 scale before this means a number of dB.
+
+## The update hang: found and fixed (2026-10-24, 0v3e-ota11)
+With trace points in the watchdog scratch registers (reported by INFO after a watchdog reset) the
+hang moved around: inside the flash erase, right after it, in the main loop, in a packet handler.
+The cause: `core1_park()` was marked `__not_in_flash_func` but the compiler inlined it into
+`ota_core1_poll()`, which lives in flash (`core1_park` was missing from the map; the park loop
+disassembled at 0x1000f72a). So Core1 spun in XIP code while Core0 erased the flash. On the bare
+boards that tiny loop stayed in the XIP cache; in the tuner it did not, and the chip hung. The SDK
+multicore lockout of 0v3e-ota2 hung the same way, very probably for the same reason (its victim
+loop was not checked).
+Fix: `__no_inline_not_in_flash_func(core1_park)` (now at 0x2000042c). Also kept: TS capture
+(DMA interrupt, PIO) stopped for the update session, GP23 high (3V3 regulator in PWM mode), the
+trace points and the 8 s watchdog, which already turned every hang into an automatic reboot.
+Tested in the tuner with the NIM powered: two updates (one during reception), trial, confirmation
+after 60 s, and a rollback after 3 unconfirmed boots (rbtest -> ota11).

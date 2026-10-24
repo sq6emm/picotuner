@@ -41,7 +41,8 @@
 #define OTA_PAUSE_TIMEOUT_US	2000000				// Core1 must park within this
 #define OTA_MARK_MAGIC			0x0da70000u			// in watchdog scratch[0] with a step number
 
-enum { MARK_IDLE, MARK_PAUSE_WAIT, MARK_PARKED, MARK_ERASE, MARK_PROGRAM, MARK_RELEASED, MARK_PAUSE_TIMEOUT } ;
+enum { MARK_IDLE, MARK_PAUSE_WAIT, MARK_PARKED, MARK_ERASE, MARK_PROGRAM, MARK_RELEASED, MARK_PAUSE_TIMEOUT,
+	   MARK_FLASH_DONE, MARK_IRQ_ON, MARK_XIP_SAME, MARK_XIP_FAR } ;
 
 extern char 	__flash_binary_end ;
 
@@ -49,7 +50,10 @@ static volatile int	core1_running ;
 static volatile int	pause_request ;
 static volatile int	core1_parked ;
 static void			(*idle_hook) (void) ;			// lets Core0 serve Core1's send requests while waiting
+static void			(*ts_hook) (int stop) ;			// stops / restarts TS capture (PIO, DMA interrupts) around a session
 static uint32_t		last_mark ;						// step the previous run stopped at, if a watchdog reset
+static uint32_t		last_trace [3] ;				// Core0 / Core1 trace points and update offset before that reset
+static int			after_wd ;
 
 static uint32_t monotime_ms_ota (void)
 {
@@ -67,12 +71,22 @@ static struct
 	uint32_t	last_ms ;
 }				session ;
 
+static void session_end (void)
+{
+	if (session.active && ts_hook)
+	{
+		ts_hook (0) ;												// TS capture back on
+	}
+	session.active = 0 ;
+}
+
+
 static uint8_t	sector_buffer [PT_SECTOR] ;
 static uint8_t	page_buffer   [PT_PAGE] ;
 static int		staged ;							// a verified image waits for ptboot
 static int		confirm_checked ;
 static uint32_t	confirm_retry_ms ;
-static char		state_text [160] ;
+static char		state_text [220] ;
 
 
 static void mark (uint32_t step)
@@ -81,16 +95,35 @@ static void mark (uint32_t step)
 }
 
 
-void ota_init (int after_watchdog, void (*hook) (void))
+void ota_init (int after_watchdog, void (*hook) (void), void (*ts) (int stop))
 {
 	uint32_t	value = watchdog_hw->scratch[0] ;
 
+	after_wd = after_watchdog ;
 	if (after_watchdog && (value & 0xffff0000u) == OTA_MARK_MAGIC && (value & 0xffff) != MARK_IDLE)
 	{
 		last_mark = value & 0xffff ;
 	}
+	if (after_watchdog)
+	{
+		last_trace [0] = watchdog_hw->scratch[1] ;
+		last_trace [1] = watchdog_hw->scratch[2] ;
+		last_trace [2] = watchdog_hw->scratch[3] ;
+	}
+	watchdog_hw->scratch[1] = 0 ;
+	watchdog_hw->scratch[2] = 0 ;
+	watchdog_hw->scratch[3] = 0 ;
 	idle_hook = hook ;
+	ts_hook   = ts ;
 	mark (MARK_IDLE) ;
+}
+
+
+// where each core is, kept over a watchdog reset (scratch 1 and 2; scratch 3: update offset)
+
+void ota_trace (int core, uint32_t where)
+{
+	watchdog_hw->scratch[1 + (core & 1)] = where ;
 }
 
 
@@ -100,9 +133,11 @@ void ota_core1_ready (void)
 }
 
 
-// Core1, from RAM: wait here, interrupts off, while Core0 erases or programs the flash
+// Core1, from RAM: wait here, interrupts off, while Core0 erases or programs the flash. It must not be
+// inlined: __not_in_flash_func alone let the compiler inline it into ota_core1_poll() in flash, so
+// Core1 spun in XIP during the erase and hung the chip (seen on 2026-10-24 in the tuner).
 
-static void __not_in_flash_func (core1_park) (void)
+static void __no_inline_not_in_flash_func (core1_park) (void)
 {
 	uint32_t	interrupts = save_and_disable_interrupts() ;
 
@@ -183,7 +218,9 @@ static int flash_write (uint32_t address, const uint8_t *data, uint32_t length, 
 		mark (MARK_PROGRAM) ;
 		flash_range_program (offset, data, length) ;
 	}
+	mark (MARK_FLASH_DONE) ;									// still with interrupts off
 	restore_interrupts (interrupts) ;
+	mark (MARK_IRQ_ON) ;										// pending interrupts have run
 
 	pause_request = 0 ;
 	t0 = time_us_32() ;
@@ -211,7 +248,9 @@ static void reply_to (int socket, uint8_t *address, uint16_t port, uint8_t cmd, 
 		strncpy ((char *) buff + length, text, 127) ;
 		length += strlen ((char *) buff + length) ;
 	}
+	ota_trace (0, 0x30) ;
 	sendto (socket, buff, length, address, port) ;
+	ota_trace (0, 0x31) ;
 }
 
 
@@ -259,11 +298,19 @@ const char* ota_state_text (void)
 	{
 		snprintf (state_text, sizeof(state_text), "pending") ;
 	}
+	if (after_wd)
+	{
+		snprintf (state_text + strlen (state_text), sizeof(state_text) - strlen (state_text),
+				  "; after watchdog reset: core0 %02x core1 %02x offset %u",
+				  (unsigned) last_trace[0], (unsigned) last_trace[1], (unsigned) last_trace[2]) ;
+	}
 	if (last_mark)
 	{
-		static const char *names [] = {"idle", "waiting for Core1", "Core1 parked", "erasing", "programming", "released", "Core1 pause timeout"} ;
+		static const char *names [] = {"idle", "waiting for Core1", "Core1 parked", "erasing", "programming", "released", 
+									   "Core1 pause timeout", "flash done, interrupts off", "interrupts back on",
+									   "XIP read of the written sector", "XIP read far away"} ;
 		snprintf (state_text + strlen (state_text), sizeof(state_text) - strlen (state_text), 
-				  "; watchdog reset during: %s", last_mark < 7 ? names[last_mark] : "?") ;
+				  "; watchdog reset during: %s", last_mark < 11 ? names[last_mark] : "?") ;
 	}
 	return (state_text) ;
 }
@@ -382,8 +429,14 @@ void ota_handle (int socket, const uint8_t *buff, int length, uint8_t *address, 
 				reply_to (socket, address, port, cmd, PTUP_ERR_SIZE, seq, PT_APP_MAX, NULL) ;
 				break ;
 			}
+			if (!session.active && ts_hook)
+			{
+				ts_hook (1) ;											// no TS DMA interrupts while flash writes hold interrupts off
+			}
+			session.active = 1 ;
 			if (flash_write (PT_META_BASE, NULL, PT_SECTOR, 1) != 0)	// cancel anything staged before
 			{
+				session_end() ;
 				reply_to (socket, address, port, cmd, PTUP_ERR_FLASH, seq, 0, "Core1 did not pause") ;
 				break ;
 			}
@@ -393,11 +446,11 @@ void ota_handle (int socket, const uint8_t *buff, int length, uint8_t *address, 
 			session.crc 	= get32 (buff + 12) ;
 			session.next 	= 0 ;
 			session.last_ms = monotime_ms_ota() ;
-			session.active 	= 1 ;
 			reply_to (socket, session.host, session.port, cmd, PTUP_OK, seq, PTUP_MAX_DATA, NULL) ;
 			break ;
 
 		case PTUP_CMD_DATA:
+			ota_trace (0, 0x20) ;
 			if (!from_session)
 			{
 				reply_to (socket, address, port, cmd, PTUP_ERR_STATE, seq, 0, NULL) ;
@@ -438,13 +491,16 @@ void ota_handle (int socket, const uint8_t *buff, int length, uint8_t *address, 
 				memcpy (sector_buffer + used, buff + PTUP_HEADER_SIZE + 6 + (session.next - offset), chunk) ;
 				session.next += chunk ;
 				count 		 -= chunk ;
-				if (used + chunk == PT_SECTOR && flush_sector (PT_SECTOR) != 0)
+				watchdog_hw->scratch[3] = session.next ;
+				if (used + chunk == PT_SECTOR && (ota_trace (0, 0x21), flush_sector (PT_SECTOR)) != 0)
 				{
 					session.next -= chunk ;							// the host resends this packet
 					break ;
 				}
 			}
+			ota_trace (0, 0x23) ;
 			reply_to (socket, session.host, session.port, cmd, PTUP_OK, seq, session.next, NULL) ;
+			ota_trace (0, 0x24) ;
 			break ;
 
 		case PTUP_CMD_END:
@@ -463,13 +519,20 @@ void ota_handle (int socket, const uint8_t *buff, int length, uint8_t *address, 
 			{
 				reply_to (socket, session.host, session.port, cmd, status, seq, session.next, NULL) ;
 			}
-			session.active = 0 ;
+			if (status == PTUP_OK)
+			{
+				session.active = 0 ;									// the reboot restarts everything
+			}
+			else
+			{
+				session_end() ;
+			}
 			break ;
 
 		case PTUP_CMD_ABORT:
 			if (from_session)
 			{
-				session.active = 0 ;
+				session_end() ;
 			}
 			reply_to (socket, address, port, cmd, PTUP_OK, seq, 0, NULL) ;
 			break ;
@@ -489,7 +552,7 @@ void ota_poll (int dhcp_ok)
 
 	if (session.active && monotime_ms_ota() - session.last_ms >= OTA_SESSION_TIMEOUT_MS)
 	{
-		session.active = 0 ;
+		session_end() ;
 	}
 
 	if (!confirm_checked && dhcp_ok && monotime_ms_ota() >= PT_CONFIRM_MS && monotime_ms_ota() >= confirm_retry_ms)

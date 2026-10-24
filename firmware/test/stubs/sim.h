@@ -25,5 +25,6 @@ extern watchdog_hw_t sim_watchdog;
 #define watchdog_hw (&sim_watchdog)
 #define WATCHDOG_CTRL_ENABLE_BITS 0x40000000u
 #define __not_in_flash_func(f) f
+#define __no_inline_not_in_flash_func(f) f
 static inline void hw_clear_bits (volatile uint32_t *r, uint32_t m) { *r &= ~m; }
 #endif

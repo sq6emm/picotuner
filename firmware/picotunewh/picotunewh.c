@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota4"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota11"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -413,6 +413,7 @@ volatile	uint32				last_dmatoggle			[MAXRECEIVERS+1]    = {0,0,0} ;
 volatile	uint32				last_dmatoggle_time 	[MAXRECEIVERS+1]    = {0,0,0} ;
 			int8				activity_ledgp			[MAXRECEIVERS+1]	= {-1, -1, -1} ;
 
+volatile	int					ts_stopped ;			// TS capture held off during an update session
 volatile	uint32				broadcast_sequence ;
 volatile	uint32				last_broadcast_time ;;
 
@@ -861,6 +862,37 @@ static void ota_idle (void)										// while Core0 waits for Core1 to park
 	}
 }
 
+// TS capture off for an update session: flash writes hold Core0's interrupts off for tens of ms,
+// and with the NIM fitted the TS PIO/DMA side hung afterwards (2026-10-24, in the DMA interrupt
+// or the PIO restart). Back on (restart through the main loop) when a session ends without a reboot.
+
+static void ota_ts (int stop)
+{
+	int		rx ;
+
+	if (stop)
+	{
+		ts_stopped = 1 ;
+		irq_set_enabled (DMA_IRQ_0, false) ;
+		for (rx = 1 ; rx <= MAXRECEIVERS ; rx++)
+		{
+			pio_sm_set_enabled (rcv[rx].piogroup, rcv[rx].piosm, false) ;
+		}
+	}
+	else
+	{
+		for (rx = 1 ; rx <= MAXRECEIVERS ; rx++)
+		{
+			if (rcv[rx].piorunning >= 2)
+			{
+				rcv[rx].piorunning = 1 ;							// the main loop re-arms PIO and DMA
+			}
+		}
+		ts_stopped = 0 ;
+		irq_set_enabled (DMA_IRQ_0, true) ;
+	}
+}
+
 int __in_flash("my_group_name") main()
 {
 	int32				argc ;
@@ -890,7 +922,10 @@ int __in_flash("my_group_name") main()
 	uint8				tempc2 ;
 
 	hw_clear_bits (&watchdog_hw->ctrl, WATCHDOG_CTRL_ENABLE_BITS) ;	// a watchdog may survive the reset: off until the main loop
-	ota_init (watchdog_caused_reboot(), ota_idle) ;
+	gpio_init (23) ;												// 3V3 regulator in PWM mode (Pico-style PS pin): less ripple
+	gpio_set_dir (23, GPIO_OUT) ;									// when flash erases draw current (update hung in the erase,
+	gpio_put (23, 1) ;												// 2026-10-24, with the NIM fitted)
+	ota_init (watchdog_caused_reboot(), ota_idle, ota_ts) ;
 	stdio_init_all() ;
 	stdio_flush() ;
 
@@ -1821,6 +1856,7 @@ void mainloop()
 		{
 			watchdog_update() ;
 		}
+		ota_trace (0, 0x01) ;
 
     	if (reboot_request)
     	{
@@ -1872,8 +1908,11 @@ void mainloop()
     	}   	
 
 		inicommand_loop() ;													// send ini commands one by one
+		ota_trace (0, 0x02) ;
 		status = dhcp_scheduler (4) ;
-		ota_poll (dhcp_success) ;											// update session timeout, confirm new firmware
+		ota_trace (0, 0x03) ;
+		ota_poll (dhcp_success) ;
+		ota_trace (0, 0x04) ;											// update session timeout, confirm new firmware
 		if (ota_reboot_wanted() && reboot_request == 0)
 		{
 			reboot_request = 2 ;											// ptboot installs the staged image
@@ -1949,22 +1988,27 @@ void mainloop()
 		
 		if (xsr10.status == 1)											// there is a send request from core 1
 		{
+			ota_trace (0, 0x05) ;
 			rx = xsr10.receiver ;
 
 			if (rcv[rx].ethusbpath == 1)								// ETH output
 			{
 				if (rcv[rx].toaddress32)
 				{
+					ota_trace (0, 0x15) ;
 					status = sendto (rcv[rx].socket, (void*)(&xsr10.buffer), xsr10.length, rcv[rx].toaddress, xsr10.port) ;
+					ota_trace (0, 0x16) ;
 				}
 			}
 			xsr10.status = 2 ;											// command processed
+			ota_trace (0, 0x06) ;
 		}
 
  		for (rx = 1 ; rx <= MAXRECEIVERS ; rx++)
 		{		
-			if (rcv[rx].piorunning == 1)
+			if (rcv[rx].piorunning == 1 && !ts_stopped)
 			{
+				ota_trace (0, 0x07) ;
 				pio_sm_set_enabled (rcv[rx].piogroup, rcv[rx].piosm, false) ;				
 				rcv[rx].piorunning = 0 ;
 				for (y = 0 ; y < 2 ; y++)
@@ -1983,6 +2027,7 @@ void mainloop()
 				pio_sm_restart      (rcv[rx].piogroup, rcv[rx].piosm) ;					
 				pio_sm_set_enabled	(rcv[rx].piogroup, rcv[rx].piosm, true);				
 				rcv[rx].piorunning = 2 ;
+				ota_trace (0, 0x17) ;
 			}
 		}
 
@@ -2013,13 +2058,16 @@ void mainloop()
 				
 				packetblockptr->packetsinblock 	= PPB ;
 				packetblockptr->receiver 		= rx ;
+				ota_trace (0, 0x08) ;
 				tsproc_loop ((void*)packetblockptr) ;					// extract info from the packets
+				ota_trace (0, 0x09) ;
 
 				if (rcv[rx].ethusbpath == 1)							// ETH
 				{
 					if (rcv[rx].toaddress[0] && packetblockptr->packetsinblock)
 					{
 						packetblockptr->length = packetblockptr->packetsinblock * TSPACKETSIZE ;
+						ota_trace (0, 0x0a) ;
 						status = 	sendto 
 									(
 										rcv[rx].socket, 
@@ -2028,6 +2076,7 @@ void mainloop()
 										rcv[rx].toaddress, 
 										rcv[rx].toport
 									) ;				
+						ota_trace (0, 0x0b) ;
 					}
 				}
 				packetcount += packetblockptr->packetsinblock ;
@@ -2046,6 +2095,7 @@ void mainloop()
 			for (rx = 0 ; rx <= MAXRECEIVERS ; rx++)
 			{
 				status = 0 ;
+				ota_trace (0, 0x0f) ;
 				status = recvfrom 
 				(
 					rcv[rx].socket, 
@@ -2057,7 +2107,9 @@ void mainloop()
 
 				if (status > 0 && rx == 0 && ota_is_packet ((uint8*) &tur01e.buffer, status))
 				{
+					ota_trace (0, 0x0c) ;
 					ota_handle (rcv[rx].socket, (uint8*) &tur01e.buffer, status, (uint8*) &tur01e.address, tur01e.port) ;
+					ota_trace (0, 0x0d) ;
 					continue ;												// update packets never reach Core1
 				}
 
@@ -2072,6 +2124,7 @@ void mainloop()
 						tur01e.receivedonport = baseipport + PORTLISTENBASE + rx ;
 					}
 ///					rcv[rx].ethusbpath 		= 1 ;						// use ETH for TS output
+					ota_trace (0, 0x10) ;
 					tur01e.buffer [status] 	= 0 ;						// terminating zero
 					tur01e.receiver 		= rx ;
 					tur01e.status			= 1 ;						// signal ready										
@@ -2117,6 +2170,7 @@ void mainloop()
         
 // check for signal loss and set idle mode
 
+		ota_trace (0, 0x0e) ;
         nowms = monotime_ms() ;
       	for (rx = 1 ; rx <= MAXRECEIVERS ; rx++)
 		{
@@ -3282,7 +3336,10 @@ void __not_in_flash_func (dma_interrupts_off) ()
 				
 void __not_in_flash_func (dma_interrupts_on) ()
 {
-    irq_set_enabled (DMA_IRQ_0, true) ;
+	if (!ts_stopped)												// held off during an update session
+	{
+	    irq_set_enabled (DMA_IRQ_0, true) ;
+	}
 }					
 
 
@@ -4433,7 +4490,9 @@ void core1_main()
 	{	
 		ota_core1_poll() ;							// park here while Core0 writes flash
 		core1_heartbeat++ ;
+		ota_trace (1, 0x02) ;
 		info_loop() ;							
+		ota_trace (1, 0x03) ;
 		
 		for (rx = 1 ; rx <= MAXRECEIVERS ; rx++)
 		{			
@@ -4468,6 +4527,7 @@ void core1_main()
 		
 		if (turp)														// command received by core 0
 		{      
+			ota_trace (1, 0x05) ;
 			goodx   		=  0  ;
 			headerx 		= -1 ;
 			rxx   			= -1 ;
@@ -5074,6 +5134,7 @@ void core1_main()
 			}
 			turp->status = 2 ;											// signal to core 0 that 
 		}																//   the command has been processed
+		ota_trace (1, 0x07) ;
 		scan_poll() ;													// band scan, if one is running
 	}
 }	
@@ -5842,6 +5903,7 @@ static	uint32			counter ;
 
 // pass to core 0 for sending
 
+				ota_trace (1, 0x10) ;
 				if (rx)
 				{
 ///					if (inicommandcount == 0)									// wait until ini commands processed
