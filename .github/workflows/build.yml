@@ -18,9 +18,11 @@ jobs:
 
       - name: Build W5500 and W5100S images
         run: |
+          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)    # reproducible: same bytes as a local build
           for chip in W5500 W5100S; do
-            docker run --rm -v "$PWD":/w -e WIZNET_CHIP=$chip picotuner-build:focal sh /w/tools/build/build.sh
+            docker run --rm -v "$PWD":/w -e WIZNET_CHIP=$chip -e SOURCE_DATE_EPOCH picotuner-build:focal sh /w/tools/build/build.sh
           done
+          sha256sum out/picotunewh.bin out/w5500/picotunewh.bin
           ls -l out out/w5500
 
       - name: Update-path tests (NOR flash model, power cuts, UDP)
