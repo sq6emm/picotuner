@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota12"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota13"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -4124,14 +4124,26 @@ volatile	uint32			thenms ;
 
 // =======================================================================================================
 // Band scan on Core1: a [to@wh] tune command with SCANF= (and optionally SCANSR=, SCANMS=) makes the
-// receiver step through the frequencies and symbol rates itself, checking the demodulator every
-// SCANPOLLMS ms. Each lock is reported after SCANHOLDMS ms, so MER, MODCOD and the service name have
-// settled, as one text line to base port + PORTSCAN (9905) of the commanding address:
-//   [from@wh:SCAN] rx=2 freq=10494750 srate=1000 state=DVB-S2 mer=8.3 modcod=QPSK 2/3 lock=640 name=...
-// and every pass ends with [from@wh:SCANPASS] rx=2 pass=n found=k time=ms. The scan repeats until
-// the next tune command for that receiver (freq=0 switches it off).
+// receiver step through the frequencies and symbol rates itself. Every pass (0v3e-ota13):
+//   1. screen: each frequency and symbol rate is tuned for SCANSCREENMS and AGC2 is read. AGC2 is
+//      the in-channel gain, so a carrier pulls it down (beacon 146 against 590 on an empty channel
+//      at 1500 kS/s, 88 against 220 at 500 kS/s). The reference is local (see scan_select);
+//      below SCANCARRIER % of it is a candidate. With fewer than 3 frequencies of that symbol
+//      rate within SCANLOCALKHZ every one is a candidate.
+//   2. lock: only the candidates are tried, with the old lock timeout; a lock is held SCANHOLDMS
+//      (MER and MODCOD settle) and reported. Later candidates inside a found signal are skipped.
+//   Every SCANNAMEEVERY-th pass (the first included) holds SCANNAMEMS, so the service name comes
+//   in from the TS; the other passes report the last name seen on that frequency.
+// Results go as text lines to base port + PORTSCAN (9905) of the commanding address:
+//   [from@wh:SCAN] rx=2 freq=10494750 srate=1000 state=DVB-S2 mer=8.3 modcod=QPSK 2/3 lock=640
+//                  name=... provider=... agc1=... agc2=...
+//   [from@wh:SCANPASS] rx=2 pass=n found=k time=ms screen=ms candidates=c
+// The scan repeats until the next tune command for that receiver (freq=0 switches it off).
 //   SCANF=10492750-10499250/500 or SCANF=10493250,10494750,10496250   frequencies in kHz (max 48)
 //   SCANSR=500,333                                                    symbol rates in kS/s (max 4)
+//   groups, each frequency list with its own symbol rates, separated by ';' in both keys:
+//   SCANF=10493250,10494750,10496250;10492750-10496750/500;10497250-10499250/500
+//   SCANSR=1500,1000;500,333;333                                      (QO-100 WB bandplan)
 //   SCANMS=1500                                                       wait for a lock; default by SR
 // Once a frequency locks, its other symbol rates are skipped.
 // =======================================================================================================
@@ -4139,10 +4151,18 @@ volatile	uint32			thenms ;
 #define	SCANMAXF			48
 #define	SCANMAXSR			4
 #define	SCANPOLLMS			40						// demodulator state check interval
-#define	SCANHOLDMS			2500					// after a lock, before reporting
+#define	SCANSCREENMS		25						// after a retune, before AGC2 is read
+#define	SCANCARRIER			80						// % of the noise reference: below it, a carrier
+#define	SCANHOLDMS			300						// after a lock, before reporting
+#define	SCANMERMS			1000					// then at most this long for a valid MER
+#define	SCANNAMEMS			2500					// hold on the passes that collect service names
+#define	SCANNAMEEVERY		10
+#define	SCANLOCALKHZ		1600					// noise reference window, each side
+#define	SCANMISSEVERY		8
+#define	SCANNAMELEN			24
 #define	PORTSCAN			5						// results to base port + 5
 
-enum { SCAN_TUNE, SCAN_WAIT, SCAN_HOLD } ;
+enum { SCAN_TUNE, SCAN_SCREEN, SCAN_LOCKTUNE, SCAN_WAIT, SCAN_HOLD } ;
 
 typedef struct
 {
@@ -4162,6 +4182,18 @@ typedef struct
 	uint32		pass ;
 	uint32		found ;
 	uint32		passstart ;
+	uint32		screenms ;							// how long the screen of this pass took
+	uint32		candidates ;
+	int			screenskip ;
+	int32		screenwait ;						// SCANSCREENMS, or SCANSCREEN= in the command
+	uint16		agc2  [SCANMAXF][SCANMAXSR] ;		// screen readings
+	uint8		srmask[SCANMAXF] ;					// bit per symbol rate: tried on this frequency
+	uint8		cand  [SCANMAXF] ;					// bit per symbol rate: a carrier in the screen
+	uint8		missed[SCANMAXF] ;					// bit per symbol rate: a carrier that did not lock
+	int32		lockf [SCANMAXF] ;					// signals found this pass (frequency, SR)
+	int32		locksr[SCANMAXF] ;
+	int			nlock ;
+	char		names [SCANMAXF][SCANNAMELEN] ;		// last service name per frequency
 } scan_t ;
 
 static	scan_t	scans [MAXRECEIVERS+1] ;
@@ -4181,21 +4213,16 @@ static	uint32	agcthen [MAXRECEIVERS+1] ;
 static	int32	agcpending ;
 
 
-// parse "1,2,3" or "start-stop/step" after key; returns the count
+// parse "1,2,3" or "start-stop/step" at *ppos (advanced past it); returns the count
 
-static int scan_parse_list (char *command, char *key, int32 *list, int max)
+static int scan_parse_list (char **ppos, int32 *list, int max)
 {
-	char	*pos = strstr (command, key) ;
+	char	*pos = *ppos ;
 	int		n = 0 ;
 	int32	start ;
 	int32	stop ;
 	int32	step ;
 
-	if (pos == 0)
-	{
-		return (0) ;
-	}
-	pos += strlen (key) ;
 	while (n < max && isdigit ((unsigned char) *pos))
 	{
 		start = strtol (pos, &pos, 10) ;
@@ -4209,7 +4236,8 @@ static int scan_parse_list (char *command, char *key, int32 *list, int max)
 			}
 			if (step <= 0 || stop < start)
 			{
-				return (0) ;
+				n = 0 ;
+				break ;
 			}
 			for ( ; start <= stop && n < max ; start += step)
 			{
@@ -4226,7 +4254,30 @@ static int scan_parse_list (char *command, char *key, int32 *list, int max)
 		}
 		pos++ ;
 	}
+	*ppos = pos ;
 	return (n) ;
+}
+
+
+// index of value in list (added if missing and room); -1 if full
+
+static int scan_index (int32 *list, int *n, int max, int32 value)
+{
+	int		x ;
+
+	for (x = 0 ; x < *n ; x++)
+	{
+		if (list [x] == value)
+		{
+			return (x) ;
+		}
+	}
+	if (*n >= max)
+	{
+		return (-1) ;
+	}
+	list [*n] = value ;
+	return ((*n)++) ;
 }
 
 
@@ -4234,11 +4285,19 @@ static int scan_parse_list (char *command, char *key, int32 *list, int max)
 
 static void scan_parse (char *command, int32 *freqx, int32 *srx)
 {
+	char	*fpos ;
+	char	*spos ;
+	int32	fl [SCANMAXF] ;
+	int32	sl [SCANMAXSR] ;
+	int		nfl ;
+	int		nsl ;
+	int		a ;
+	int		b ;
+	int		fi ;
+	int		si ;
 	char	*pos ;
 
 	memset (&scanpending, 0, sizeof(scanpending)) ;
-	scanpending.nf  = scan_parse_list (command, "SCANF=",  scanpending.f,  SCANMAXF) ;
-	scanpending.nsr = scan_parse_list (command, "SCANSR=", scanpending.sr, SCANMAXSR) ;
 	pos = strstr (command, "SCANMS=") ;
 	if (pos)
 	{
@@ -4258,20 +4317,64 @@ static void scan_parse (char *command, int32 *freqx, int32 *srx)
 			agcpending = AGCMSMAX ;
 		}
 	}
-	if (scanpending.nf == 0)
+	scanpending.screenwait = SCANSCREENMS ;
+	pos = strstr (command, "SCANSCREEN=") ;
+	if (pos)
 	{
+		scanpending.screenwait = atoi (pos + strlen ("SCANSCREEN=")) ;
+	}
+	fpos = strstr (command, "SCANF=") ;
+	if (fpos == 0)
+	{
+		return ;
+	}
+	fpos += strlen ("SCANF=") ;
+	spos  = strstr (command, "SCANSR=") ;
+	if (spos)
+	{
+		spos += strlen ("SCANSR=") ;
+	}
+	while (1)															// one group per pass
+	{
+		nfl = scan_parse_list (&fpos, fl, SCANMAXF) ;
+		nsl = spos ? scan_parse_list (&spos, sl, SCANMAXSR) : 0 ;
+		if (nsl == 0 && *srx > 0)
+		{
+			sl [0] = *srx ;												// the command's symbol rate
+			nsl = 1 ;
+		}
+		for (a = 0 ; a < nfl ; a++)
+		{
+			fi = scan_index (scanpending.f, &scanpending.nf, SCANMAXF, fl [a]) ;
+			for (b = 0 ; b < nsl && fi >= 0 ; b++)
+			{
+				si = scan_index (scanpending.sr, &scanpending.nsr, SCANMAXSR, sl [b]) ;
+				if (si >= 0)
+				{
+					scanpending.srmask [fi] |= 1 << si ;
+				}
+			}
+		}
+		if (*fpos != ';')
+		{
+			break ;
+		}
+		fpos++ ;
+		if (spos && *spos == ';')
+		{
+			spos++ ;
+		}
+	}
+	if (scanpending.nf == 0 || scanpending.nsr == 0)
+	{
+		scanpending.nf = 0 ;
 		return ;
 	}
 	if (*freqx < 0)
 	{
 		*freqx = scanpending.f [0] ;
 	}
-	if (scanpending.nsr == 0 && *srx > 0)
-	{
-		scanpending.sr [0] = *srx ;							// scan with the command's symbol rate
-		scanpending.nsr = 1 ;
-	}
-	if (*srx < 0 && scanpending.nsr)
+	if (*srx < 0)
 	{
 		*srx = scanpending.sr [0] ;
 	}
@@ -4355,48 +4458,203 @@ static void scan_tune (int rx, int32 freq, int32 sr)
 }
 
 
-static void scan_next (int rx, scan_t *s, int locked)
-{
-	char	temps [96] ;
+// end of a pass: report it and start the next one with a new screen
 
-	s->si++ ;
-	if (locked || s->si >= s->nsr)									// a lock: skip the other SRs
+static void scan_pass_done (int rx, scan_t *s)
+{
+static	char	temps [128 + SCANMAXF * SCANMAXSR * 6] ;		// static: Core1 stack is small
+	int		fi ;
+	int		si ;
+
+	s->pass++ ;
+	sprintf
+	(
+		temps, "[from@wh:SCANPASS] rx=%d pass=%u found=%u time=%u screen=%u candidates=%u\r\n",
+		rx + rxbase, (unsigned) s->pass, (unsigned) s->found, (unsigned) (monotime_ms() - s->passstart),
+		(unsigned) s->screenms, (unsigned) s->candidates
+	) ;
+	strcpy (temps + strlen (temps) - 2, " agc2=") ;					// screen readings, frequency by frequency,
+	for (fi = 0 ; fi < s->nf ; fi++)									// '/' between symbol rates, '-' not tried
 	{
-		s->si = 0 ;
-		s->fi++ ;
+		for (si = 0 ; si < s->nsr ; si++)
+		{
+			if (s->srmask [fi] & (1 << si))
+			{
+				sprintf (temps + strlen (temps), "%u", s->agc2 [fi][si]) ;
+			}
+			else
+			{
+				strcat (temps, "-") ;
+			}
+			strcat (temps, si + 1 < s->nsr ? "/" : (fi + 1 < s->nf ? "," : "\r\n")) ;
+		}
 	}
-	if (s->fi >= s->nf)
-	{
-		s->fi = 0 ;
-		s->pass++ ;
-		sprintf
-		(
-			temps, "[from@wh:SCANPASS] rx=%d pass=%u found=%u time=%u\r\n",
-			rx + rxbase, (unsigned) s->pass, (unsigned) s->found, (unsigned) (monotime_ms() - s->passstart)
-		) ;
-		scan_send (rx, temps) ;
-		s->found 	 = 0 ;
-		s->passstart = monotime_ms() ;
-	}
-	s->phase = SCAN_TUNE ;
+	scan_send (rx, temps) ;
+	s->found 	 = 0 ;
+	s->passstart = monotime_ms() ;
+	s->fi 		 = 0 ;
+	s->si 		 = 0 ;
+	s->phase 	 = SCAN_TUNE ;
 }
 
 
-static void scan_report (int rx, scan_t *s)
+// after the screen: mark the candidates. The noise floor is not flat over the band (AGC2 about 320
+// at 10492.75 and 200 at 10498.25 MHz, 2026-10-24), so the reference is local: the highest AGC2
+// (least power) of the same symbol rate within SCANLOCALKHZ. A carrier that did not lock last time
+// is tried again only every SCANMISSEVERY-th pass.
+
+static void scan_select (scan_t *s)
 {
-	char	temps [320] ;
+	int		fi ;
+	int		fj ;
+	int		si ;
+	int		n ;
+	int32	d ;
+	uint32	reference ;
+
+	s->candidates = 0 ;
+	s->nlock 	  = 0 ;
+	for (fi = 0 ; fi < s->nf ; fi++)
+	{
+		s->cand [fi] = 0 ;
+		for (si = 0 ; si < s->nsr ; si++)
+		{
+			if ((s->srmask [fi] & (1 << si)) == 0)
+			{
+				continue ;
+			}
+			reference = 0 ;
+			n 		  = 0 ;
+			for (fj = 0 ; fj < s->nf ; fj++)
+			{
+				d = s->f [fj] - s->f [fi] ;
+				if ((s->srmask [fj] & (1 << si)) && d <= SCANLOCALKHZ && d >= -SCANLOCALKHZ)
+				{
+					n++ ;
+					if (s->agc2 [fj][si] > reference)
+					{
+						reference = s->agc2 [fj][si] ;
+					}
+				}
+			}
+			if (n < 3 || (uint32) s->agc2 [fi][si] * 100 < reference * SCANCARRIER)
+			{
+				if ((s->missed [fi] & (1 << si)) && ((s->pass + fi + si) % SCANMISSEVERY) != 0)
+				{
+					continue ;											// did not lock before: not every pass,
+				}														// spread over the passes
+				s->cand [fi] |= 1 << si ;
+				s->candidates++ ;
+			}
+			else
+			{
+				s->missed [fi] &= ~(1 << si) ;							// gone
+			}
+		}
+	}
+}
+
+
+// move fi/si to the next candidate after the current one (start: si = -1); 0 when the pass is over
+
+static int scan_next_candidate (scan_t *s, int locked)
+{
+	int		x ;
+	int32	d ;
+
+	if (locked)
+	{
+		s->si = s->nsr ;												// a lock: skip the other SRs
+	}
+	while (1)
+	{
+		s->si++ ;
+		if (s->si >= s->nsr)
+		{
+			s->si = 0 ;
+			s->fi++ ;
+		}
+		if (s->fi >= s->nf)
+		{
+			return (0) ;
+		}
+		if ((s->cand [s->fi] & (1 << s->si)) == 0)
+		{
+			continue ;
+		}
+		for (x = 0 ; x < s->nlock ; x++)								// inside a signal already found?
+		{
+			d = s->f [s->fi] - s->lockf [x] ;
+			if (d < 0)
+			{
+				d = -d ;
+			}
+			if (d < (s->locksr [x] * 2) / 3)							// kHz against kS/s: about half the
+			{															// occupied bandwidth
+				break ;
+			}
+		}
+		if (x == s->nlock)
+		{
+			return (1) ;
+		}
+	}
+}
+
+
+static void scan_report (int rx, scan_t *s, uint8 state)
+{
+	char	temps [360] ;
+	char	mer   [12] ;
+	char	modcod [24] ;
+	int32	value ;
+	uint32	mc ;
+	uint8	rate ;
+	bool	b1 ;
+	bool	b2 ;
+	uint16	agc1 = 0 ;
 
 	s->found++ ;
+	GLOBALNIM = rcv[rx].nim ;
+	mer [0]    = 0 ;
+	modcod [0] = 0 ;
+	if (stv0910_read_mer (rcv[rx].nimreceiver, &value) == ERROR_NONE && value != -300)
+	{
+		sprintf (mer, "%.1f", (float) value / 10) ;
+	}
+	if (state == STATE_DEMOD_S2)
+	{
+		if (stv0910_read_modcod_and_type (rcv[rx].nimreceiver, &mc, &b1, &b2) == ERROR_NONE && mc < 32)
+		{
+			strcpy (modcod, modinfo_S2[mc].modtext) ;
+		}
+	}
+	else if (stv0910_read_puncture_rate (rcv[rx].nimreceiver, &rate) == ERROR_NONE && rate < 9)
+	{
+		strcpy (modcod, modinfo_S[rate].modtext) ;
+	}
+	stv0910_read_agc1_gain (rcv[rx].nimreceiver, &agc1) ;
+	if (rcv[rx].textinfos[STATUS_SERVICE_NAME][0])
+	{
+		strncpy (s->names [s->fi], rcv[rx].textinfos[STATUS_SERVICE_NAME], SCANNAMELEN - 1) ;
+		s->names [s->fi][SCANNAMELEN-1] = 0 ;
+	}
 	snprintf
 	(
 		temps, sizeof(temps),
-		"[from@wh:SCAN] rx=%d freq=%d srate=%d state=%s mer=%s modcod=%s lock=%u name=%s provider=%s agc1=%s\r\n",
-		rx + rxbase, s->f[s->fi], s->sr[s->si],
-		rcv[rx].textinfos[STATUS_STATE], rcv[rx].textinfos[STATUS_MER], rcv[rx].textinfos[STATUS_MODCOD],
-		(unsigned) s->tlock, rcv[rx].textinfos[STATUS_SERVICE_NAME],
-		rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME], rcv[rx].textinfos[STATUS_AGC1_GAIN]
+		"[from@wh:SCAN] rx=%d freq=%d srate=%d state=%s mer=%s modcod=%s lock=%u name=%s provider=%s agc1=%u agc2=%u\r\n",
+		rx + rxbase, s->f[s->fi], s->sr[s->si], state == STATE_DEMOD_S2 ? "DVB-S2" : "DVB-S",
+		mer, modcod, (unsigned) s->tlock, s->names [s->fi],
+		rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME], agc1, s->agc2 [s->fi][s->si]
 	) ;
 	scan_send (rx, temps) ;
+	s->missed [s->fi] &= ~(1 << s->si) ;
+	if (s->nlock < SCANMAXF)
+	{
+		s->lockf  [s->nlock] = s->f  [s->fi] ;
+		s->locksr [s->nlock] = s->sr [s->si] ;
+		s->nlock++ ;
+	}
 }
 
 
@@ -4461,6 +4719,8 @@ static void scan_poll (void)
 	uint32	now ;
 	uint32	limit ;
 	uint8	state ;
+	uint16	a1 ;
+	uint16	a2 ;
 
 	for (rx = 1 ; rx <= MAXRECEIVERS ; rx++)
 	{
@@ -4472,7 +4732,54 @@ static void scan_poll (void)
 		now = monotime_ms() ;
 		switch (s->phase)
 		{
-			case SCAN_TUNE:
+			case SCAN_TUNE:												// screen: next frequency / SR
+				if ((s->srmask [s->fi] & (1 << s->si)) == 0)
+				{
+					s->phase = SCAN_SCREEN ;							// not on this frequency: skip it
+					s->agc2 [s->fi][s->si] = 0xffff ;
+					s->t0 = now - s->screenwait ;
+					s->screenskip = 1 ;
+					break ;
+				}
+				s->screenskip = 0 ;
+				scan_tune (rx, s->f[s->fi], s->sr[s->si]) ;
+				s->t0 	 = now ;
+				s->phase = SCAN_SCREEN ;
+				break ;
+
+			case SCAN_SCREEN:
+				if (now - s->t0 < (uint32) s->screenwait)
+				{
+					break ;
+				}
+				if (!s->screenskip)
+				{
+					GLOBALNIM = rcv[rx].nim ;
+					a1 = a2 = 0xffff ;
+					stv0910_read_agc2_gain (rcv[rx].nimreceiver, &a1) ;
+					stv0910_read_agc2_gain (rcv[rx].nimreceiver, &a2) ;
+					s->agc2 [s->fi][s->si] = (a1 >> 1) + (a2 >> 1) ;
+				}
+				s->phase = SCAN_TUNE ;
+				if (++s->si >= s->nsr)
+				{
+					s->si = 0 ;
+					if (++s->fi >= s->nf)								// screen done
+					{
+						s->screenms = now - s->passstart ;
+						scan_select (s) ;
+						s->fi = 0 ;
+						s->si = -1 ;
+						s->phase = scan_next_candidate (s, 0) ? SCAN_LOCKTUNE : SCAN_TUNE ;
+						if (s->phase == SCAN_TUNE)
+						{
+							scan_pass_done (rx, s) ;
+						}
+					}
+				}
+				break ;
+
+			case SCAN_LOCKTUNE:
 				scan_tune (rx, s->f[s->fi], s->sr[s->si]) ;
 				s->t0 		= now ;
 				s->tpoll 	= now ;
@@ -4502,35 +4809,63 @@ static void scan_poll (void)
 				{
 					s->header = 1 ;
 				}
-				limit = s->waitms ? s->waitms : 400 + 600000 / s->sr[s->si] ;
+				limit = s->waitms ? s->waitms : 400 + 400000 / s->sr[s->si] ;	// locks took 80-740 ms
 				if (s->header)
 				{
 					limit *= 3 ;											// headers seen: give it longer
 				}
 				if (now - s->t0 >= limit)
 				{
-					scan_next (rx, s, 0) ;
+					s->missed [s->fi] |= 1 << s->si ;
+					if (scan_next_candidate (s, 0))
+					{
+						s->phase = SCAN_LOCKTUNE ;
+					}
+					else
+					{
+						scan_pass_done (rx, s) ;
+					}
 				}
 				break ;
 
 			case SCAN_HOLD:
-				if (now - s->t0 >= SCANHOLDMS)
+				limit = (s->pass % SCANNAMEEVERY) == 0 ? SCANNAMEMS : SCANHOLDMS ;
+				if (now - s->t0 < limit || now - s->tpoll < SCANPOLLMS)
 				{
-					GLOBALNIM = rcv[rx].nim ;								// still locked? A short lock that has
-					if 														// gone is not reported (seen 2026-10-24)
+					break ;
+				}
+				s->tpoll = now ;
+				GLOBALNIM = rcv[rx].nim ;
+				if
+				(
+					stv0910_read_scan_state (rcv[rx].nimreceiver, &state) != ERROR_NONE ||
+					(state != STATE_DEMOD_S2 && state != STATE_DEMOD_S)
+				)
+				{
+					a1 = 0 ;												// lost: a short lock is not reported
+				}
+				else
+				{
+					int32	mer ;
+
+					if 
 					(
-						stv0910_read_scan_state (rcv[rx].nimreceiver, &state) == ERROR_NONE &&
-						(state == STATE_DEMOD_S2 || state == STATE_DEMOD_S) &&
-						(rcv[rx].scanstate == STATE_DEMOD_S2 || rcv[rx].scanstate == STATE_DEMOD_S)
+						stv0910_read_mer (rcv[rx].nimreceiver, &mer) == ERROR_NONE && mer == -300 &&
+						now - s->t0 < limit + SCANMERMS
 					)
 					{
-						scan_report (rx, s) ;
-						scan_next (rx, s, 1) ;
+						break ;												// MER not valid yet
 					}
-					else
-					{
-						scan_next (rx, s, 0) ;
-					}
+					scan_report (rx, s, state) ;
+					a1 = 1 ;
+				}
+				if (scan_next_candidate (s, a1))
+				{
+					s->phase = SCAN_LOCKTUNE ;
+				}
+				else
+				{
+					scan_pass_done (rx, s) ;
 				}
 				break ;
 		}

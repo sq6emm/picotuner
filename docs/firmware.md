@@ -1,4 +1,4 @@
-# PicoTuneWH 0v3e-ota12 (own build)
+# PicoTuneWH 0v3e-ota13 (own build)
 
 G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picotunewh/`, plus:
 
@@ -49,6 +49,17 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
    The scanner reports a station only if it is still locked after the hold time. Deliberate
    reboots (command, update) are marked, so `--info` reports only real watchdog resets.
    C/N in dB is not computed in the firmware: the known tables are GPL-2.0-only (dddvb).
+
+8. **Fast band scan (0v3e-ota13)**: each pass first screens every frequency/symbol rate by AGC2
+   (25 ms each; a carrier lowers AGC2 against a local noise reference, the highest AGC2 within
+   1.6 MHz), then tries a lock only on the candidates; the lock timeout is 400 ms + 400 s / SR
+   (kS/s); a lock is held 300 ms, every 10th pass 2.5 s for the service name (other passes report
+   the last name seen). Carriers that do not lock are retried only every 8th pass, staggered.
+   Groups: `SCANF=a;b;c SCANSR=x;y;z` give each frequency list its own symbol rates
+   (QO-100 WB bandplan: 500 kS/s only up to 10496.75 MHz). `SCANSCREEN=ms` changes the screen
+   wait. The pass line carries `screen=`, `candidates=` and all AGC2 readings. On 2026-10-24,
+   with `tools/qo100scan.py --rx 1,2` (plan split over both receivers) and an empty band, a pass
+   took 2.1-2.3 s (median); before, 54 s for the narrow channels alone.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):

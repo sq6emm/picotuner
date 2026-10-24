@@ -1,8 +1,14 @@
-"""Band scan with the scanner inside PicoTuneWH 0v3e-ota3 (SCANF= / SCANSR= in a tune command).
+"""Band scan with the scanner inside PicoTuneWH 0v3e-ota13 (SCANF= / SCANSR= in a tune command).
 
     python3 qo100scan.py TUNER_IP                  # QO-100 WB plan on RX2
-    python3 qo100scan.py TUNER_IP --rx 1,2         # wide channels on RX1, narrow on RX2
+    python3 qo100scan.py TUNER_IP --rx 1,2         # the plan split over both receivers
     python3 qo100scan.py TUNER --group 10491500:1500 --csv found.csv
+
+The default plan follows the BATC QO-100 WB bandplan (wiki.batc.org.uk/QO-100_WB_Bandplan), as in
+the original scanner.sh: wide channels 10493.25/10494.75/10496.25 MHz at 1500 and 1000 kS/s,
+narrow channels every 500 kHz from 10492.75 to 10499.25 MHz at 333 kS/s, and 500 kS/s only up to
+10496.75 MHz (narrow channels 1-9). Each pass screens every channel by AGC2 and tries a lock only
+where a carrier shows; the service name is collected on every 10th pass.
 
 The tuner steps through the channels itself and sends one line per station found to UDP 9905 of
 this machine; this tool only starts it, prints the lines and repeats the command every 5 minutes
@@ -10,7 +16,9 @@ this machine; this tool only starts it, prints the lines and repeats the command
 take turns, one pass each. Ctrl-C switches the scanning receivers off (freq=0), or tunes them to
 --park FREQ:SR. While it runs, the receivers' status and TS also come to this machine.
 
-A group is FREQS:SRS, FREQS as "start-stop/step" or "f1,f2,...", SRS as "sr1,sr2" (kHz, kS/s)."""
+A group is FREQS:SRS, FREQS as "start-stop/step" or "f1,f2,...", SRS as "sr1,sr2" (kHz, kS/s).
+Several frequency lists with their own symbol rates go in one group separated by ';' on both sides,
+e.g. "10493250,10494750:1500,1000;10497250-10499250/500:333"."""
 import argparse
 import csv
 import select
@@ -18,8 +26,10 @@ import socket
 import sys
 import time
 
-QO100 = ['10493250,10494750,10496250:1500,1000',            # wide channels
-         '10492750-10499250/500:500,333']                    # narrow channels
+WIDE = '10493250,10494750,10496250'
+QO100_ONE = [f'{WIDE};10492750-10496750/500;10497250-10499250/500:1500,1000;500,333;333']
+QO100_TWO = [f'{WIDE};10492750-10494750/500:1500,1000;500,333',              # RX1: about half
+             '10495250-10496750/500;10497250-10499250/500:500,333;333']        # RX2: the rest
 
 
 def parse_fields(line):
@@ -44,10 +54,11 @@ def main():
     ap.add_argument('--resend', type=float, default=300)
     ap.add_argument('--park', help='FREQ:SR to tune to on exit instead of switching off')
     ap.add_argument('--csv')
+    ap.add_argument('--quiet', action='store_true', help='print empty passes only every 20th')
     a = ap.parse_args()
 
-    groups = a.group or QO100
     rxs = [int(x) for x in a.rx.split(',')]
+    groups = a.group or (QO100_TWO if len(rxs) >= 2 else QO100_ONE)
     cmd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     res = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     res.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -86,15 +97,17 @@ def main():
                         name = line.split('name=')[1].split(' provider=')[0] if 'name=' in line else ''
                         print(f"{stamp} RX{rx} {d.get('freq')} {d.get('srate'):>5} {d.get('state')} "
                               f"MER {d.get('mer')} {line.split('modcod=')[1].split(' lock=')[0]} "
-                              f"lock {d.get('lock')} ms  {name}")
+                              f"lock {d.get('lock')} ms AGC2 {d.get('agc2')}  {name}")
                         if writer:
                             writer.writerow([stamp, rx, d.get('freq'), d.get('srate'), d.get('state'), d.get('mer'),
                                              line.split('modcod=')[1].split(' lock=')[0], d.get('lock'), name,
                                              d.get('agc1')])
                             f.flush()
                     elif line.startswith('[from@wh:SCANPASS]'):
-                        print(f"{stamp} RX{rx} pass {d.get('pass')}: {d.get('found')} found, "
-                              f"{int(d.get('time', 0)) / 1000:.1f} s")
+                        if not a.quiet or d.get('found') != '0' or int(d.get('pass', 0)) % 20 == 1:
+                            print(f"{stamp} RX{rx} pass {d.get('pass')}: {d.get('found')} found, "
+                                  f"{int(d.get('time', 0)) / 1000:.1f} s (screen {d.get('screen')} ms, "
+                                  f"{d.get('candidates')} candidates)")
                         if rotate and rx in turn:
                             turn[rx] = (turn[rx] + len(rxs)) % len(groups)
                             start(rx, groups[turn[rx]])
