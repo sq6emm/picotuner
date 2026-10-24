@@ -6,19 +6,16 @@ relative). It drives the tuner over UDP:
     watching both receivers share the plan, while someone watches RX2 scans it alone;
   - viewing: RX1 tuned to the chosen station, its TS (UDP base+41) re-encoded by ffmpeg to a small
     HLS stream (480p, ~400 kb/s by default); it stops IDLE_STOP_S after the last viewer leaves.
-Anyone can watch and choose a station (OPEN_CONTROL=1, the default; one change per
-CHANGE_GAP_S for everybody); with OPEN_CONTROL=0 choosing needs PASSWORD.
+Anyone can watch and choose a station (one change per CHANGE_GAP_S for everybody).
 
-Environment: TUNER (IP), PASSWORD, HTTP_PORT (8090), BASE_PORT (9900), LNB_OFFSET (9750000),
+Environment: TUNER (IP), HTTP_PORT (8090), BASE_PORT (9900), LNB_OFFSET (9750000),
 VGX (HI), VIDEO_HEIGHT (480), VIDEO_KBPS (400), IDLE_STOP_S (60), HLS_DIR (/hls),
-OPEN_CONTROL (1), CHANGE_GAP_S (15).
+CHANGE_GAP_S (15).
 """
 import asyncio
-import hashlib
-import hmac
 import json
+import math
 import os
-import secrets
 import shutil
 import socket
 import time
@@ -27,7 +24,6 @@ from pathlib import Path
 from aiohttp import web
 
 TUNER = os.environ.get('TUNER', 'TUNER_IP')
-PASSWORD = os.environ.get('PASSWORD', '')
 HTTP_PORT = int(os.environ.get('HTTP_PORT', '8090'))
 BASE = int(os.environ.get('BASE_PORT', '9900'))
 OFFSET = int(os.environ.get('LNB_OFFSET', '9750000'))
@@ -36,14 +32,12 @@ HEIGHT = int(os.environ.get('VIDEO_HEIGHT', '480'))
 KBPS = int(os.environ.get('VIDEO_KBPS', '400'))
 IDLE_STOP_S = int(os.environ.get('IDLE_STOP_S', '60'))
 HLS_DIR = Path(os.environ.get('HLS_DIR', '/hls'))
-OPEN_CONTROL = os.environ.get('OPEN_CONTROL', '1') == '1'
 CHANGE_GAP_S = int(os.environ.get('CHANGE_GAP_S', '15'))
 STATIC = Path(__file__).parent / 'static'
 
 RESEND_S = 240            # the firmware stops sending off-net after 15 min; resend well before
 STATION_TTL_S = 30        # a station not reported for this long is dropped from the list
 VIEWER_TTL_S = 12         # a page that stopped polling is no longer a viewer
-SECRET = secrets.token_bytes(32)
 
 # QO-100 WB bandplan (wiki.batc.org.uk/QO-100_WB_Bandplan): beacon + wide channels at 1500/1000,
 # narrow channels every 500 kHz at 333 kS/s, 500 kS/s only up to 10496.75 MHz.
@@ -64,6 +58,8 @@ class State:
         self.mode = None
         self.ffmpeg = None
         self.last_change = 0.0
+        self.plans = {1: None, 2: None}
+        self.spectrum = {1: None, 2: None}   # per receiver: last pass's screen readings
 
 
 S = State()
@@ -74,7 +70,32 @@ def send(text):
     cmd_sock.sendto(text.encode(), (TUNER, BASE + 20))
 
 
+def plan_layout(plan):
+    """Frequency and symbol rate lists in the order the firmware builds them (first seen first),
+    so the AGC2 readings of a pass line can be mapped back to channels."""
+    freqs, srs = plan.split(':')
+    flist, slist, pairs = [], [], set()
+    for fg, sg in zip(freqs.split(';'), srs.split(';')):
+        fl = []
+        for item in fg.split(','):
+            if '-' in item:
+                a, rest = item.split('-')
+                b, step = rest.split('/')
+                fl += list(range(int(a), int(b) + 1, int(step)))
+            else:
+                fl.append(int(item))
+        for f in fl:
+            if f not in flist:
+                flist.append(f)
+            for sr in (int(x) for x in sg.split(',')):
+                if sr not in slist:
+                    slist.append(sr)
+                pairs.add((f, sr))
+    return flist, slist, pairs
+
+
 def scan_cmd(rx, plan):
+    S.plans[rx] = plan
     freqs, srs = plan.split(':')
     send(f'[to@wh] rcv={rx} offset={OFFSET} fplug=A vgx={VGX} scanf={freqs} scansr={srs}')
 
@@ -124,7 +145,31 @@ class ScanProtocol(asyncio.DatagramProtocol):
             elif line.startswith('[from@wh:SCANPASS]'):
                 rx = int(kv.get('rx', 0))
                 S.passes[rx] = {'time': int(kv.get('time', 0)), 'found': int(kv.get('found', 0)),
+                                'screen': int(kv.get('screen', 0)), 'candidates': int(kv.get('candidates', 0)),
                                 'at': time.time()}
+                if ' agc2=' in line and S.plans.get(rx):
+                    spectrum_from_pass(rx, line.split(' agc2=', 1)[1].strip())
+
+
+def spectrum_from_pass(rx, dump):
+    """AGC2 per channel -> relative level in dB. AGC2 is the in-channel gain (lower = more power),
+    so level = 20 log10(reference / AGC2), the reference being the weakest reading of that symbol
+    rate in the pass (about the noise floor). The front end normalises the total LNB power, so this
+    is a relative picture, good for occupancy, not an absolute measurement."""
+    flist, slist, pairs = plan_layout(S.plans[rx])
+    rows = dump.split(',')
+    if len(rows) != len(flist):
+        return                                           # a pass from the previous plan
+    vals = {}
+    for f, row in zip(flist, rows):
+        for sr, v in zip(slist, row.split('/')):
+            if v.isdigit() and (f, sr) in pairs and int(v) > 0:
+                vals[(f, sr)] = int(v)
+    ref = {}
+    for (f, sr), v in vals.items():
+        ref[sr] = max(ref.get(sr, 0), v)
+    pts = [{'f': f, 'sr': sr, 'db': round(20 * math.log10(ref[sr] / v), 2)} for (f, sr), v in vals.items()]
+    S.spectrum[rx] = {'points': sorted(pts, key=lambda p: (p['f'], -p['sr'])), 'at': time.time()}
 
 
 class StatusProtocol(asyncio.DatagramProtocol):
@@ -211,15 +256,6 @@ async def supervisor():
 # ---------------------------------------------------------------------------------------------
 # HTTP
 
-def make_token():
-    exp = str(int(time.time()) + 12 * 3600)
-    return exp + '.' + hmac.new(SECRET, exp.encode(), hashlib.sha256).hexdigest()
-
-
-def control_ok(request):
-    return OPEN_CONTROL or token_ok(request)
-
-
 def change_allowed():
     wait = CHANGE_GAP_S - (time.time() - S.last_change)
     if wait > 0:
@@ -227,17 +263,28 @@ def change_allowed():
     S.last_change = time.time()
 
 
-def token_ok(request):
-    tok = request.headers.get('X-Token', '')
-    if '.' not in tok:
-        return False
-    exp, sig = tok.split('.', 1)
-    good = hmac.new(SECRET, exp.encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(sig, good) and exp.isdigit() and int(exp) > time.time()
-
-
 async def index(request):
     return web.FileResponse(STATIC / 'index.html', headers={'Cache-Control': 'no-cache'})
+
+
+def dedupe(stations):
+    """The demodulator also locks on a station from the neighbouring channel (500 kHz away, the
+    carrier search reaches it), so one signal can show up twice: keep, of entries with the same
+    callsign closer than their symbol rate, the one with the better MER."""
+    def mer(s):
+        try:
+            return float(s.get('mer') or -99)
+        except ValueError:
+            return -99.0
+    keep = []
+    for st in stations:
+        twin = next((k for k in keep if st.get('name') and k.get('name') == st['name']
+                     and abs(k['freq'] - st['freq']) <= max(k['srate'], st['srate'])), None)
+        if twin is None:
+            keep.append(st)
+        elif mer(st) > mer(twin):
+            keep[keep.index(twin)] = st
+    return keep
 
 
 async def api_state(request):
@@ -245,32 +292,21 @@ async def api_state(request):
     if cid and request.query.get('watching') == '1':
         S.viewers[cid] = time.time()
     now = time.time()
-    stations = sorted(S.stations.values(), key=lambda s: s['freq'])
+    stations = dedupe(sorted(S.stations.values(), key=lambda s: s['freq']))
     return web.json_response({
         'now': now,
         'stations': [{**s, 'age': round(now - s['seen'], 1)} for s in stations],
         'viewing': S.viewing,
         'video': S.viewing is not None and (HLS_DIR / 'index.m3u8').exists(),
         'rx1': S.status[1] if now - S.status[1].get('at', 0) < 10 else {},
-        'passes': {k: v for k, v in S.passes.items() if v and now - v['at'] < 60},
+        'passes': {k: {**v, 'age': round(now - v['at'], 1)} for k, v in S.passes.items() if v and now - v['at'] < 60},
+        'spectrum': [p for sp in S.spectrum.values() if sp and now - sp['at'] < 60 for p in sp['points']],
         'viewers': len(S.viewers),
         'mode': S.mode,
-        'auth_ok': control_ok(request),
-        'open': OPEN_CONTROL,
     }, headers={'Cache-Control': 'no-store'})
 
 
-async def api_login(request):
-    body = await request.json()
-    if not PASSWORD or not hmac.compare_digest(str(body.get('password', '')), PASSWORD):
-        await asyncio.sleep(1.0)                         # slow down guessing
-        raise web.HTTPForbidden(text='bad password')
-    return web.json_response({'token': make_token()})
-
-
 async def api_tune(request):
-    if not control_ok(request):
-        raise web.HTTPForbidden(text='login first')
     body = await request.json()
     freq, srate = int(body['freq']), int(body['srate'])
     if not (10489000 <= freq <= 10500000) or srate not in (33, 66, 125, 250, 333, 500, 1000, 1500, 2000):
@@ -287,8 +323,6 @@ async def api_tune(request):
 
 
 async def api_stop(request):
-    if not control_ok(request):
-        raise web.HTTPForbidden(text='login first')
     change_allowed()
     S.viewing = None
     await stop_ffmpeg()
@@ -347,7 +381,6 @@ def main():
     for pre in ('', '/{prefix:.+}'):
         app.router.add_get(pre + '/', index)
         app.router.add_get(pre + '/api/state', api_state)
-        app.router.add_post(pre + '/api/login', api_login)
         app.router.add_post(pre + '/api/tune', api_tune)
         app.router.add_post(pre + '/api/stop', api_stop)
         app.router.add_get(pre + '/hls/{name}', hls)

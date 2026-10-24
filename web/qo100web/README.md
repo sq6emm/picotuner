@@ -1,12 +1,11 @@
-# QO-100 WB web monitor
+# QO-100 WB web monitor (QO-100 WB Monitor by SQ6EMM)
 
 A small web page for a PicoTuner (PicoTuneWH 0v3e-ota13 or later): the tuner's own band scan of
 the QO-100 wideband transponder as a live list, and the chosen station as a re-encoded,
 low-bitrate HLS stream (480p, about 400 kb/s) for watching over the internet.
 
 - With nobody watching, both receivers scan the BATC WB bandplan (about 2 s per pass).
-- Anyone picks a station (one change per 15 s for everybody; `OPEN_CONTROL=0` makes choosing
-  need `PASSWORD`): RX1 tunes to it, ffmpeg re-encodes its TS to HLS, and RX2 keeps scanning the
+- Anyone picks a station (one change per 15 s for everybody): RX1 tunes to it, ffmpeg re-encodes its TS to HLS, and RX2 keeps scanning the
   whole plan. Everybody watches the same station.
 - When nobody has watched for `IDLE_STOP_S` (60 s), the stream stops and both receivers scan
   again.
@@ -18,7 +17,7 @@ and TS away from the app until its next command (it resends every 4 minutes).
 ## Run
 
 ```sh
-cp .env.example .env      # TUNER if it is not TUNER_IP; PASSWORD only with OPEN_CONTROL=0
+cp .env.example .env      # set TUNER if it is not TUNER_IP
 docker compose up -d --build
 ```
 
@@ -42,7 +41,6 @@ location /qo100/ {
 ## API
 
 - `GET api/state?id=<client>&watching=0|1`: stations, RX1 status, what is on, scan pass times.
-- `POST api/login {"password": ...}` returns a token; send it as `X-Token`.
-- `POST api/tune {"freq": kHz, "srate": kS/s}` and `POST api/stop` (token needed only with
-  `OPEN_CONTROL=0`; 429 within `CHANGE_GAP_S` of the last change).
+- `POST api/tune {"freq": kHz, "srate": kS/s}` and `POST api/stop` (429 within `CHANGE_GAP_S`
+  of the last change).
 - `GET hls/index.m3u8` and its segments.

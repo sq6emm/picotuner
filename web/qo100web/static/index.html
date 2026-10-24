@@ -3,21 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QO-100 WB Monitor</title>
+<title>QO-100 WB Monitor by SQ6EMM</title>
 <link rel="stylesheet" href="static/style.css">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
 </head>
 <body>
 <header>
-  <h1>QO-100 WB Monitor</h1>
+  <h1>QO-100 WB Monitor by SQ6EMM</h1>
+  <span class="muted">based on PicoTuner with custom firmware with scanner</span>
   <span id="scaninfo" class="muted"></span>
   <span class="spacer"></span>
-  <form id="login" class="login" hidden>
-    <input id="pw" type="password" placeholder="password" autocomplete="current-password">
-    <button type="submit">Log in</button>
-  </form>
-  <span id="logged" class="muted" hidden>control enabled · <a href="#" id="logout">log out</a></span>
 </header>
+
+<section class="spectrum">
+  <canvas id="spec" height="220"></canvas>
+  <div class="muted small">Decoded stations at their relative level from the tuner's channel scan (AGC2 of the station's channel), not an FFT. Click a station to watch it.</div>
+</section>
 
 <main>
   <section class="player">
