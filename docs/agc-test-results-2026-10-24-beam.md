@@ -137,3 +137,9 @@ el +0.4: 149. The feed-service position is now shown about el -7.3.
   firmware switches an off-net receiver off after 15 minutes).
 - LNB oscillator: the beacon is at 741.958 MHz IF (LO 458 kHz low); a few days earlier ~0.95 MHz.
   Fits a DRO (one unsourced forum post says DRO); a 24 h log would settle it.
+- AGC2 scale calibrated (2026-10-24 ~23:00): cold sky 5 deg above the arc, RX2, AGCHOLD, symbol
+  rate 2000 .. 66 kS/s (noise power in the channel proportional to SR, 14.8 dB range) at 10501
+  and 10503 MHz: AGC2 ~ SR^0.520 / SR^0.511, i.e. power ~ 1/AGC2^1.92 / 1/AGC2^1.96. The model
+  power = k / AGC2^2 holds; single points scatter up to ~9 % (AGC1 is re-held at each tune), so
+  compare within one hold. The beam widths and the Moon figure above stand: the low gain is the
+  antenna, not the readings.
