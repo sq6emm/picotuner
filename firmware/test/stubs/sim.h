@@ -19,4 +19,11 @@ absolute_time_t get_absolute_time (void);
 uint32_t to_ms_since_boot (absolute_time_t t);
 void reset_usb_boot (uint32_t a, uint32_t b);
 void irq_set_mask_enabled (uint32_t mask, bool enabled);
+uint32_t time_us_32 (void);
+typedef struct { volatile uint32_t ctrl; volatile uint32_t scratch[8]; } watchdog_hw_t;
+extern watchdog_hw_t sim_watchdog;
+#define watchdog_hw (&sim_watchdog)
+#define WATCHDOG_CTRL_ENABLE_BITS 0x40000000u
+#define __not_in_flash_func(f) f
+static inline void hw_clear_bits (volatile uint32_t *r, uint32_t m) { *r &= ~m; }
 #endif

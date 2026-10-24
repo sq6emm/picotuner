@@ -21,6 +21,7 @@
 #include "hardware/regs/m0plus.h"
 #include "hardware/structs/scb.h"
 #include "hardware/sync.h"
+#include "hardware/structs/watchdog.h"
 
 #include "../common/ptupdate.h"
 
@@ -179,6 +180,7 @@ int main (void)
 {
 	const pt_meta_t	*m = META ;
 
+	hw_clear_bits (&watchdog_hw->ctrl, WATCHDOG_CTRL_ENABLE_BITS) ;	// the app's watchdog may survive its reset
 	blink (1, 400) ;												// ptboot runs
 	update() ;
 

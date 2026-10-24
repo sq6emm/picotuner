@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota3"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan
+#define VERSIONX2	"e-ota4"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -848,6 +848,19 @@ void lmprint (char* xstring)											// intercept print output from LM
 //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
  
+volatile	uint32			core1_heartbeat ;						// counted by Core1's loop, checked before feeding the watchdog
+
+#define	WATCHDOG_MS				8000					// reboot if Core0's loop or Core1's loop stops for this long
+#define	CORE1_STALL_MS			6000
+
+static void ota_idle (void)										// while Core0 waits for Core1 to park
+{
+	if (xsr10.status == 1)
+	{
+		xsr10.status = 2 ;											// drop the pending send so Core1 can move on
+	}
+}
+
 int __in_flash("my_group_name") main()
 {
 	int32				argc ;
@@ -876,6 +889,8 @@ int __in_flash("my_group_name") main()
 	uint8 				scanstate ;	
 	uint8				tempc2 ;
 
+	hw_clear_bits (&watchdog_hw->ctrl, WATCHDOG_CTRL_ENABLE_BITS) ;	// a watchdog may survive the reset: off until the main loop
+	ota_init (watchdog_caused_reboot(), ota_idle) ;
 	stdio_init_all() ;
 	stdio_flush() ;
 
@@ -1788,8 +1803,25 @@ void mainloop()
 
 	inhibit_lmprint = 1 ;
 
+	{
+		static	uint32	last_heartbeat ;
+		static	uint32	last_heartbeat_ms ;
+
+	last_heartbeat_ms = monotime_ms() ;
+	watchdog_enable (WATCHDOG_MS, 1) ;
+
 	while (1)
     { 
+		if (core1_heartbeat != last_heartbeat)								// Core1 is still going round
+		{
+			last_heartbeat 	  = core1_heartbeat ;
+			last_heartbeat_ms = monotime_ms() ;
+		}
+		if (monotime_ms() - last_heartbeat_ms < CORE1_STALL_MS)
+		{
+			watchdog_update() ;
+		}
+
     	if (reboot_request)
     	{
     		for (x = 0 ; x < 10 ; x++)
@@ -2128,6 +2160,7 @@ void mainloop()
     	   	}
        	}	               
     }	
+	}																		// watchdog block
 }
 
 
@@ -4398,6 +4431,8 @@ void core1_main()
 
 	while (1)
 	{	
+		ota_core1_poll() ;							// park here while Core0 writes flash
+		core1_heartbeat++ ;
 		info_loop() ;							
 		
 		for (rx = 1 ; rx <= MAXRECEIVERS ; rx++)
@@ -5452,7 +5487,7 @@ static	uint32			counter ;
 					{
 						rcv[rx].textinfos[s2_fields[z]][0] = 0 ;
 					}
-					if (!locked_s && !locked_s2)
+					if (!locked_s)
 					{
 						rcv[rx].textinfos[STATUS_BER][0] = 0 ;
 					}
@@ -5472,7 +5507,7 @@ static	uint32			counter ;
 						sprintf (rcv[rx].textinfos[y], "%d", value) ;
 					}
 
-					if (locked_s || locked_s2)
+					if (locked_s)															// meaningless in DVB-S2 (seen 2026-10-23)
 					{
 						y = STATUS_BER ;														// parameter 11
 						if (stv0910_read_ber (rcv[rx].nimreceiver, &value) == ERROR_NONE)

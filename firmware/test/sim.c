@@ -11,6 +11,8 @@
 
 #define _GNU_SOURCE
 #include <arpa/inet.h>
+#include <pthread.h>
+#include <time.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,7 +35,9 @@ static long		ops_until_cut = -1 ;					// power cut after this many flash operati
 static long		flash_ops ;
 static uint32_t	now_ms ;
 static int		udp = -1 ;
-static int		lockouts ;
+static volatile int	core1_in_poll ;					// the simulated Core1 is inside ota_core1_poll()
+static volatile int	core1_stop ;
+static pthread_t	core1_thread ;
 
 enum { EXIT_APP = 1, EXIT_BOOTSEL, EXIT_POWER_CUT } ;
 
@@ -74,7 +78,7 @@ void flash_range_erase (uint32_t offset, size_t count)
 	{
 		fprintf (stderr, "erase of the boot area %#x\n", offset) ; exit (2) ;
 	}
-	if (lockouts == 0 && udp >= 0)
+	if (core1_thread && !core1_in_poll)
 	{
 		fprintf (stderr, "flash erased with Core1 running\n") ; exit (2) ;
 	}
@@ -87,7 +91,7 @@ void flash_range_program (uint32_t offset, const uint8_t *data, size_t count)
 	{
 		fprintf (stderr, "bad program %#x %#zx\n", offset, count) ; exit (2) ;
 	}
-	if (lockouts == 0 && udp >= 0)
+	if (core1_thread && !core1_in_poll)
 	{
 		fprintf (stderr, "flash written with Core1 running\n") ; exit (2) ;
 	}
@@ -96,12 +100,46 @@ void flash_range_program (uint32_t offset, const uint8_t *data, size_t count)
 
 uint32_t save_and_disable_interrupts (void)			{ return (0) ; }
 void restore_interrupts (uint32_t status)			{ (void) status ; }
-void multicore_lockout_victim_init (void)			{ }
-void multicore_lockout_start_blocking (void)		{ lockouts++ ; }
-void multicore_lockout_end_blocking (void)			{ lockouts-- ; }
 absolute_time_t get_absolute_time (void)			{ return (now_ms) ; }
 uint32_t to_ms_since_boot (absolute_time_t t)		{ return ((uint32_t) t) ; }
 void irq_set_mask_enabled (uint32_t m, bool e)		{ (void) m ; (void) e ; }
+watchdog_hw_t sim_watchdog ;
+uint32_t time_us_32 (void)
+{
+	struct timespec	t ;
+
+	clock_gettime (CLOCK_MONOTONIC, &t) ;
+	return ((uint32_t) (t.tv_sec * 1000000u + t.tv_nsec / 1000)) ;
+}
+
+// Core1 as a thread: its main loop calls ota_core1_poll() between other work
+
+static void *core1_loop (void *arg)
+{
+	(void) arg ;
+	while (!core1_stop)
+	{
+		core1_in_poll = 1 ;
+		ota_core1_poll() ;
+		core1_in_poll = 0 ;
+		usleep (2000) ;										// the rest of its loop: I2C, status
+	}
+	return (NULL) ;
+}
+
+static void core1_start (void)
+{
+	ota_core1_ready() ;
+	core1_stop = 0 ;
+	pthread_create (&core1_thread, NULL, core1_loop, NULL) ;
+}
+
+static void core1_halt (void)							// Core1 stops answering (stuck elsewhere)
+{
+	core1_stop = 1 ;
+	pthread_join (core1_thread, NULL) ;
+	core1_thread = 0 ;
+}
 void reset_usb_boot (uint32_t a, uint32_t b)		{ (void) a ; (void) b ; longjmp (boot_exit, EXIT_BOOTSEL) ; }
 void start_application (void)						{ longjmp (boot_exit, EXIT_APP) ; }
 
@@ -307,11 +345,33 @@ static void selftest (void)
 	stage (new, sizeof(new), sizeof(old)) ;
 	boot() ;
 	now_ms = 61000 ;
-	ota_core1_ready() ;
-	udp = 0 ;													// flash writes from the app need the lockout
+	core1_start() ;
 	ota_poll (1) ;
-	udp = -1 ;
-	expect (meta_()->confirmed == PT_FLAG_SET, "ota_poll() confirms after 60 s") ;
+	core1_halt() ;
+	expect (meta_()->confirmed == PT_FLAG_SET, "ota_poll() confirms after 60 s, Core1 parked") ;
+
+	printf ("Core1 never parks\n") ;
+	{
+		uint8_t		begin [32] = "PTUP" ;
+		uint8_t		host [4] = {127, 0, 0, 1} ;
+		uint32_t	size = sizeof(new) ;
+		uint32_t	crc = pt_crc32 (new, sizeof(new)) ;
+		uint32_t	t0 ;
+		uint8_t		meta_before [PT_PAGE] ;
+
+		memcpy (meta_before, (const void *) (uintptr_t) PT_META_BASE, PT_PAGE) ;
+		begin [4] = PTUP_CMD_BEGIN ;
+		memcpy (begin + 8, &size, 4) ;
+		memcpy (begin + 12, &crc, 4) ;
+		begin [16] = 9 ;
+		memcpy (begin + 17, "picotuner", 9) ;
+		ota_core1_ready() ;										// says it runs, but never polls
+		t0 = time_us_32() ;
+		ota_handle (0, begin, 26, host, 1234) ;
+		expect (time_us_32() - t0 >= 1900000 && time_us_32() - t0 < 4000000, "BEGIN gives up after ~2 s, no hang") ;
+		expect (memcmp (meta_before, (const void *) (uintptr_t) PT_META_BASE, PT_PAGE) == 0, "metadata not erased") ;
+		expect (!ota_active(), "no session started") ;
+	}
 	for (n = 0 ; n < 6 ; n++)
 	{
 		boot() ;
@@ -339,7 +399,7 @@ static void serve (const char *path, int port)
 	uint8_t				buff [1400] ;
 	ssize_t				n ;
 
-	ota_core1_ready() ;
+	core1_start() ;
 	udp = socket (AF_INET, SOCK_DGRAM, 0) ;
 	if (bind (udp, (struct sockaddr *) &me, sizeof(me)) < 0) { perror ("bind") ; exit (2) ; }
 	printf ("listening on 127.0.0.1:%d\n", port) ;
@@ -406,9 +466,9 @@ int main (int argc, char **argv)
 	{
 		load (argv[2]) ;
 		now_ms = 61000 ;
-		ota_core1_ready() ;
-		udp = 0 ;
+		core1_start() ;
 		ota_poll (1) ;
+		core1_halt() ;
 		save (argv[2]) ;
 		printf ("%s\n", ota_state_text()) ;
 		return (0) ;

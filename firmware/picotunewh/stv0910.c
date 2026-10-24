@@ -731,14 +731,7 @@ uint8_t stv0910_read_errors_bch_uncorrected (uint8_t tunerdemod, bool *errors_bc
 
     err = stv0910_read_reg_field (FSTV0910_ERRORFLAG, &result) ;
 
-    if(result == 0) 
-	{
-        *errors_bch_uncorrected = true ;
-    }
-    else 
-	{
-        *errors_bch_uncorrected = false ;
-    }
+    *errors_bch_uncorrected = result != 0 ;		// LongMynd had it inverted: 1 with no BCH errors (seen 2026-10-23)
 
     if (err != ERROR_NONE) printf ("ERROR: STV0910 read BCH Errors Uncorrected\n") ;
 

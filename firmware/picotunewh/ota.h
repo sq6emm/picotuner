@@ -11,7 +11,9 @@
 
 #include <stdint.h>
 
+void		ota_init			(int after_watchdog, void (*idle_hook) (void)) ;	// early in main()
 void		ota_core1_ready		(void) ;										// called first thing on Core1
+void		ota_core1_poll		(void) ;										// Core1 main loop: park for a flash write
 int			ota_is_packet		(const uint8_t *buff, int length) ;
 void		ota_handle			(int socket, const uint8_t *buff, int length, uint8_t *address, uint16_t port) ;
 int			ota_active			(void) ;										// a session is in progress: poll fast

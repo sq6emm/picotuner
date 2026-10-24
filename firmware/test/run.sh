@@ -6,7 +6,7 @@ T=$(mktemp -d)
 cd "$(dirname "$0")"
 gcc -O1 -g -Wall -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast -fno-pie -no-pie \
     -DPTBOOT_TEST -DOLD_APP_SIZE=0x18000 -Wl,--defsym,__flash_binary_end=0x10020000 \
-    -Istubs -o "$T/sim" sim.c ../ptboot/ptboot.c ../picotunewh/ota.c
+    -Istubs -pthread -o "$T/sim" sim.c ../ptboot/ptboot.c ../picotunewh/ota.c
 echo "== selftest"
 "$T/sim" selftest
 
