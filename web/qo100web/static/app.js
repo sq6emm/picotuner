@@ -54,8 +54,10 @@ function render(s) {
   $('stop').hidden = !s.viewing;
   $('watch').hidden = !(s.video && !watching);
   $('novideo').hidden = Boolean(s.video && watching);
+  $('novideotext').textContent = watching && s.viewing ? 'Tuning… starting the stream' : 'Nothing on air from this receiver.';
   drawSpectrum(s);
-  if (watching && !s.video) stopPlayer();
+  if (watching && !s.viewing) stopPlayer();                // the stream was stopped
+  else if (watching && !s.video && playingFreq) stopPlayer(true);   // new station: wait for its stream
   if (watching && s.video && s.viewing && playingFreq !== s.viewing.freq) startPlayer(s.viewing.freq);
 }
 
