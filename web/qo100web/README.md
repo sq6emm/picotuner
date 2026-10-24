@@ -45,3 +45,7 @@ location /qo100/ {
 - `POST api/tune {"freq": kHz, "srate": kS/s}` and `POST api/stop` (429 within `CHANGE_GAP_S`
   of the last change).
 - `GET hls/index.m3u8` and its segments.
+
+## License
+
+GPL v3, as the rest of the repository (see `LICENSE` at the top).

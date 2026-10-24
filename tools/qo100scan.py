@@ -32,6 +32,13 @@ QO100_TWO = [f'{WIDE};10492750-10494750/500:1500,1000;500,333',              # R
              '10495250-10496750/500;10497250-10499250/500:500,333;333']        # RX2: the rest
 
 
+def between(line, key, end):
+    """Text after key up to end ('' when the key is missing, e.g. a line from older firmware)."""
+    if key not in line:
+        return ''
+    return line.split(key, 1)[1].split(end, 1)[0]
+
+
 def parse_fields(line):
     out = {}
     for part in line.split():
@@ -94,13 +101,13 @@ def main():
                     rx = int(d.get('rx', 0))
                     stamp = time.strftime('%Y-%m-%d %H:%M:%S')
                     if line.startswith('[from@wh:SCAN]'):
-                        name = line.split('name=')[1].split(' provider=')[0] if 'name=' in line else ''
+                        name = between(line, 'name=', ' provider=')
                         print(f"{stamp} RX{rx} {d.get('freq')} {d.get('srate'):>5} {d.get('state')} "
-                              f"MER {d.get('mer')} {line.split('modcod=')[1].split(' lock=')[0]} "
+                              f"MER {d.get('mer')} {between(line, 'modcod=', ' lock=')} "
                               f"lock {d.get('lock')} ms AGC2 {d.get('agc2')}  {name}")
                         if writer:
                             writer.writerow([stamp, rx, d.get('freq'), d.get('srate'), d.get('state'), d.get('mer'),
-                                             line.split('modcod=')[1].split(' lock=')[0], d.get('lock'), name,
+                                             between(line, 'modcod=', ' lock='), d.get('lock'), name,
                                              d.get('agc1')])
                             f.flush()
                     elif line.startswith('[from@wh:SCANPASS]'):

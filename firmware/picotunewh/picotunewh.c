@@ -150,7 +150,6 @@
 #define NULL_PID			8191
 #define NULL2_PID			8190					// fake null packet insert by some modulators
 #define	ON					1
-#define OFF					0
 #define PAT_PID				0
 #define PORTINFOLMEX		1						// textual status for all receivers
 #define PORTINFOMULTIRX		2						// 4 line receiver summary

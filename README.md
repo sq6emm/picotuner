@@ -37,3 +37,8 @@ there is no upstream git repository, so this one cannot be a GitHub fork.
 - WIZnet RP2040-HAT-C SDK used by the build: https://github.com/Wiznet/RP2040-HAT-C
 
 The changes made here are described in `docs/firmware.md` (0v3e-ota1 .. ota15).
+
+## License
+
+GPL v3 (`LICENSE`): the firmware is derived from G4EWJ's GPL v3 PicoTuneWH source and LongMynd;
+the tools and the web app are under the same license.

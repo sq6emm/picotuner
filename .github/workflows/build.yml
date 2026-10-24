@@ -1,0 +1,41 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image (Ubuntu 20.04 toolchain)
+        run: docker build -t picotuner-build:focal -f tools/build/Dockerfile.focal tools/build
+
+      - name: Fetch the pinned RP2040-HAT-C SDK
+        run: sh tools/build/fetch-sdk.sh
+
+      - name: Build W5500 and W5100S images
+        run: |
+          for chip in W5500 W5100S; do
+            docker run --rm -v "$PWD":/w -e WIZNET_CHIP=$chip picotuner-build:focal sh /w/tools/build/build.sh
+          done
+          ls -l out out/w5500
+
+      - name: Update-path tests (NOR flash model, power cuts, UDP)
+        run: docker run --rm -v "$PWD":/w -w /w picotuner-build:focal sh firmware/test/run.sh
+
+      - name: Web app and tools syntax
+        run: |
+          python3 -m py_compile web/qo100web/app.py tools/*.py
+          node --check web/qo100web/static/app.js
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.sha }}
+          path: |
+            out/picotunewh-full.uf2
+            out/picotunewh.bin
+            out/w5500/picotunewh-full.uf2
+            out/w5500/picotunewh.bin

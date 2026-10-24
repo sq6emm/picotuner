@@ -1,2 +1,5 @@
 # G4EWJ PicoTunerWH binaries are not ours: kept locally, never committed
 fw/
+# the SDK fetched by tools/build/fetch-sdk.sh, and build output
+/build/
+/out/

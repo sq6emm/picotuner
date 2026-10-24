@@ -119,14 +119,18 @@ rsync -az firmware tools user@<build host>:~/work/picotuner/
 ssh user@<build host> 'docker run --rm -u $(id -u):$(id -g) -e PTUP_KEY=... \
     -v ~/work/picotuner:/w picotuner-build:focal sh /w/tools/build/build.sh'
 ```
-Needs `~/work/picotuner/build/RP2040-HAT-C` (2024-08-08, pico-sdk 1.4.0) and the image from
-`tools/build/Dockerfile.focal`. Output in `~/work/picotuner/out/`:
+Needs `build/RP2040-HAT-C` at the pinned commit (`sh tools/build/fetch-sdk.sh` clones it: 2024-08-08,
+pico-sdk 1.4.0) and the image from `tools/build/Dockerfile.focal`
+(`docker build -t picotuner-build:focal -f tools/build/Dockerfile.focal tools/build`). The same
+steps run on GitHub Actions for every push (`.github/workflows/build.yml`: build, tests, images
+as artifacts). Output in `~/work/picotuner/out/`:
 `picotunewh-full.uf2` (ptboot + app, first install over USB), `picotunewh.bin` (updates).
 Without `PTUP_KEY` the key is `picotuner`.
 
 Tests (host, no hardware): `sh firmware/test/run.sh` — ota.c and ptboot.c against a NOR-flash
 model at 0x10000000: install, rollback, a power cut at every flash operation (119 install /
-49 rollback), corrupt staging, and ptupdate.py → ota.c → ptboot over real UDP.
+49 rollback), corrupt staging, BEGIN while on trial, malformed PTUP packets, and
+ptupdate.py → ota.c → ptboot over real UDP.
 
 ## Install, update, way back
 - **First time (USB):** `[to@wh] bootsel=369` to port 9920 (or the BOOTSEL button), then copy

@@ -143,11 +143,17 @@ static void core1_halt (void)							// Core1 stops answering (stuck elsewhere)
 void reset_usb_boot (uint32_t a, uint32_t b)		{ (void) a ; (void) b ; longjmp (boot_exit, EXIT_BOOTSEL) ; }
 void start_application (void)						{ longjmp (boot_exit, EXIT_APP) ; }
 
+static int		last_status = -1 ;							// status byte of the last PTUP reply
+
 int32_t wiz_sendto (uint8_t sn, uint8_t *buf, uint16_t len, uint8_t *addr, uint16_t port)
 {
 	struct sockaddr_in	to = { .sin_family = AF_INET, .sin_port = htons (port) } ;
 
 	(void) sn ;
+	if (len > 5)
+	{
+		last_status = buf [5] ;
+	}
 	memcpy (&to.sin_addr, addr, 4) ;
 	return ((int32_t) sendto (udp, buf, len, 0, (struct sockaddr *) &to, sizeof(to))) ;
 }
@@ -407,7 +413,60 @@ static void selftest (void)
 		((pt_meta_t *) (FLASH + (PT_META_BASE - XIP_BASE)))->confirmed = PT_FLAG_SET ;	// as ota_poll() would after 60 s
 		ota_handle (0, begin, 26, host, 1234) ;
 		expect (ota_active(), "accepted once confirmed") ;
+
+		printf ("malformed packets\n") ;							// the session above is still open
+		{
+			uint8_t		other [4] = {10, 0, 0, 9} ;
+			uint8_t		data [PTUP_HEADER_SIZE + 6 + 64] = "PTUP" ;
+			uint32_t	off = 0 ;
+			uint16_t	cnt = 64 ;
+
+			ota_handle (0, begin, 26, other, 1234) ;
+			expect (last_status == PTUP_ERR_STATE, "BEGIN from another host during a session: busy") ;
+			data [4] = PTUP_CMD_DATA ;
+			memcpy (data + 8, &off, 4) ;
+			memcpy (data + 12, &cnt, 2) ;
+			ota_handle (0, data, sizeof(data) - 1, host, 1234) ;
+			expect (last_status == PTUP_ERR_FORMAT, "DATA shorter than its count: format error") ;
+			off = 4096 ;
+			memcpy (data + 8, &off, 4) ;
+			ota_handle (0, data, sizeof(data), host, 1234) ;
+			expect (last_status == PTUP_ERR_OFFSET, "DATA at the wrong offset: offset error") ;
+			off = 0xfffffff0u ;
+			memcpy (data + 8, &off, 4) ;
+			ota_handle (0, data, sizeof(data), host, 1234) ;
+			expect (last_status != PTUP_OK, "DATA with an offset that wraps: refused") ;
+			cnt = 2000 ;
+			off = 0 ;
+			memcpy (data + 8, &off, 4) ;
+			memcpy (data + 12, &cnt, 2) ;
+			ota_handle (0, data, sizeof(data), host, 1234) ;
+			expect (last_status == PTUP_ERR_FORMAT, "DATA count beyond the packet: format error") ;
+			ota_handle (0, data, sizeof(data), other, 1234) ;
+			expect (last_status == PTUP_ERR_STATE, "DATA from another host: refused") ;
+			expect (ota_active(), "the session survives all of it") ;
+		}
 		core1_halt() ;
+	}
+
+	printf ("malformed packets without a session\n") ;
+	{
+		uint8_t		host [4] = {127, 0, 0, 1} ;
+		uint8_t		shortbegin [12] = "PTUP" ;
+		uint8_t		badkey [32] = "PTUP" ;
+		uint32_t	size = 1000 ;
+
+		expect (!ota_is_packet ((const uint8_t *) "PTUP", 4) && !ota_is_packet ((const uint8_t *) "XXXXXXXXXXXX", 12),
+				"too short or not PTUP: not taken as an update packet") ;
+		shortbegin [4] = PTUP_CMD_BEGIN ;
+		ota_handle (0, shortbegin, sizeof(shortbegin), host, 5678) ;
+		expect (last_status == PTUP_ERR_FORMAT || last_status == PTUP_ERR_STATE, "BEGIN without size and key: refused") ;
+		badkey [4] = PTUP_CMD_BEGIN ;
+		memcpy (badkey + 8, &size, 4) ;
+		badkey [16] = 9 ;
+		memcpy (badkey + 17, "wrong-key", 9) ;
+		ota_handle (0, badkey, 26, host, 5678) ;
+		expect (last_status == PTUP_ERR_KEY || last_status == PTUP_ERR_STATE, "BEGIN with a wrong key: refused") ;
 	}
 
 	printf ("%s\n", failures ? "FAILED" : "all passed") ;

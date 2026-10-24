@@ -31,23 +31,6 @@
     Copyright Brian Jordan, G4EWJ
 */
 
-/* 
-I2C addresses need to be shifted right for /dev/i2c-1
-	
-///#define NIM_DEMOD_ADDR_A 	0xd0
-///#define NIM_DEMOD_ADDR_B 	0xd2
-#define NIM_DEMOD_ADDR_A 	0xd2
-#define NIM_DEMOD_ADDR_B 	0xd0
-#define PIC_ADDR_A	 		0xd8						// each NIM interfaces to a PIC, which is on the i2c bus
-#define PIC_ADDR_B	 		0xda
-#define NIM_TUNER_ADDR 		0xc0						
-#define STVVGLNA_I2C_ADDR0 	0xc8						// same for all NIMs . . . 
-#define STVVGLNA_I2C_ADDR1 	0xca						// same for all NIMs . . . 
-#define STVVGLNA_I2C_ADDR2 	0xcc						// same for all NIMs . . . 
-#define STVVGLNA_I2C_ADDR3 	0xce						// same for all NIMs . . . 
-#define NIM_LNA_0_ADDR 		STVVGLNA_I2C_ADDR3			// make sure only the required repeater . . . 
-#define NIM_LNA_1_ADDR 		STVVGLNA_I2C_ADDR0			// in the STV0910s is turned on		
-*/
 
 /* -------------------------------------------------------------------------------------------------- */
 /* ----------------- INCLUDES ----------------------------------------------------------------------- */
@@ -180,53 +163,6 @@ int i2c_read_reg16 (uint8_t i2caddr, uint16_t reg, uint8_t *val)
 		return (status) ;
 	}
 	
-/*
-///	printf ("i2c: %02X %04X\r\n",addr,reg) ; ///////////////	    
-
-	i2cfd = open (i2cname,O_RDWR) ;							
-    if (i2cfd < 0)
-    {
-        printf ("Error@: Cannot open %s (%s)\r\n",i2cname,strerror(errno)) ;
-        err = errno ;
-    }
-	else													// check for slave presence
-	{
-///BBB		err = ioctl (i2cfd, I2C_SLAVE, addr >> 1) ;			// slave addresses are 7 bit for /dev/i2c-1		
-		if (err < 0)
-		{
-			printf ("Error@: Cannot open I2C slave 0x%02X (%s)\r\n",addr,strerror(errno)) ;
-			err = errno ;
-		}
-		else
-		{
-			buff [0] = (reg >> 8) & 0xff ;
-			buff [1] = (reg >> 0) & 0xff ;
-			err = write (i2cfd,buff,2) ;					// first send the register address
-			if (err < 0)
-			{
-				printf ("Error@: Cannot set register address on device 0x%02X register 0x%04X (%s)\r\n",addr,reg,strerror(errno)) ;
-				err = errno ;
-			}
-			else
-			{
-				err = read (i2cfd,buff,1) ;					// now read the byte
-				if (err < 0)
-				{
-					printf ("Error@: Cannot read byte from device 0x%02X (%s)\r\n",addr,strerror(errno)) ;
-					err = errno ;
-				}
-				else
-				{
-					err = 0 ;
-					*val = (uint8_t) (buff[0]) ;
-				}
-			}
-		}
-		close (i2cfd) ;
-	}
-
-    return (err) ;
-*/
 } 
 
 /* -------------------------------------------------------------------------------------------------- */
@@ -261,47 +197,6 @@ int i2c_write_reg16 (uint8_t i2caddr, uint16_t reg, uint8_t val)
 		return (status) ;
 	}
     
-/*    
-	char		buff [8] ;								
-
-///	printf ("i2c: %02X %04X %02X\r\n",addr,reg,val) ; ///////////////	    
-
-	i2cfd = open (i2cname,O_RDWR) ;						
-    if (i2cfd < 0)
-    {
-        printf ("Error@: Cannot open %s (%s)\r\n",i2cname,strerror(errno)) ;
-        err = errno ;
-    }
-	else													// check for slave presence
-	{
-///BBB		err = ioctl (i2cfd, I2C_SLAVE, addr >> 1) ;			// slave addresses are 7 bit for /dev/i2c-1		
-		if (err < 0)
-		{
-			printf ("Error@: Cannot open I2C slave 0x%02X (%s)\r\n",addr,strerror(errno)) ;
-			close (i2cfd) ;
-			err = errno ;
-		}
-		else
-		{
-			buff [0] = (reg >> 8) & 0xff ;
-			buff [1] = (reg >> 0) & 0xff ;
-			buff [2] = val ;
-			err = write (i2cfd,buff,3) ;
-			if (err < 0)
-			{
-				printf ("Error@: Cannot write byte to device 0x%02X register 0x%02X (%s)\r\n",addr,reg,strerror(errno)) ;
-				err = errno ;
-			}
-			else
-			{
-				err = 0 ;
-			}
-			close (i2cfd) ;
-		}
-	}
-
-    return (err) ;
-*/
 }
 
 /* -------------------------------------------------------------------------------------------------- */
@@ -338,59 +233,6 @@ int i2c_read_reg8 (uint8_t i2caddr, uint8_t reg, uint8_t *val)
 		return (status) ;
 	}
 	
-/*
-///    uint8_t err;											
-
-	char		buff [8] ;									
-	int			err ;											
-
-///	printf ("i2c: %02X %02X\r\n",addr,reg) ; ///////////////	    
-
-	i2cfd = open (i2cname,O_RDWR) ;							
-    if (i2cfd < 0)
-    {
-        printf ("Error@: Cannot open %s (%s)\r\n",i2cname,strerror(errno)) ;
-        err = errno ;
-    }
-	else													// check for slave presence
-	{
-///BBB		err = ioctl (i2cfd, I2C_SLAVE, addr >> 1) ;			// slave addresses are 7 bit for /dev/i2c-1		
-		if (err < 0)
-		{
-			printf ("Error@: Cannot open I2C slave 0x%02X (%s)\r\n",addr,strerror(errno)) ;
-			err = errno ;
-		}
-		else
-		{
-			buff [0] = reg ;
-			err = write (i2cfd,buff,1) ;					// first send the register address
-			if (err < 0)
-			{
-				printf ("Error@: Cannot set register address on device 0x%02X register 0x%04X (%s)\r\n",addr,reg,strerror(errno)) ;
-				err = errno ;
-			}
-			else
-			{
-				err = read (i2cfd,buff,1) ;					// now read the byte
-				if (err < 0)
-				{
-					printf ("Error@: Cannot read byte from device 0x%02X (%s)\r\n",addr,strerror(errno)) ;
-					err = errno ;
-				}
-				else
-				{
-					err = 0 ;
-					*val = (uint8_t) (buff[0]) ;
-				}
-			}
-		}
-		close (i2cfd) ;
-	}
-
-    if (err!=ERROR_NONE) printf("ERROR: i2c read reg8 0x%.2x, 0x%.2x\n",addr,reg);
-
-    return err;
-*/
 }
 
 /* -------------------------------------------------------------------------------------------------- */
@@ -424,46 +266,6 @@ int i2c_write_reg8 (uint8_t i2caddr, uint8_t reg, uint8_t val)
 
 ///	printf ("i2c: %02X %02X %02X\r\n",addr,reg,val) ; ///////////////	    
 
-/*BBB
-	i2cfd = open (i2cname,O_RDWR) ;							
-    if (i2cfd < 0)
-    {
-        printf ("Error@: Cannot open %s (%s)\r\n",i2cname,strerror(errno)) ;
-        err = errno ;
-    }
-	else													// check for slave presence
-	{
-		err = ioctl (i2cfd, I2C_SLAVE, i2caddr >> 1) ;			// slave addresses are 7 bit for /dev/i2c-1		
-		if (err < 0)
-		{
-			printf ("Error@: Cannot open I2C slave 0x%02X (%s)\r\n",i2caddr,strerror(errno)) ;
-			close (i2cfd) ;
-			err = errno ;
-		}
-		else
-		{
-			buff [0] = reg ;
-			buff [1] = val ;
-			err = write (i2cfd,buff,2) ;
-			if (err < 0)
-			{
-				printf ("Error@: Cannot write byte to device 0x%02X register 0x%02X (%s)\r\n",i2caddr,reg,strerror(errno)) ;
-				err = errno ;
-			}
-			else
-			{
-				err = 0 ;
-			}
-			close (i2cfd) ;
-		}
-	}
-
-    return (err) ;
-
-    if (err!=ERROR_NONE) printf("ERROR: i2c_write reg8 0x%.2x, 0x%.2x, 0x%.2x\n",i2caddr,reg,val);
-
-    return err;
-*/
 }
 
 
