@@ -21,7 +21,7 @@
   <div>
     <h2>Station</h2>
     <dl>
-      <dt>Antenna</dt><dd>2.4 m prime-focus dish, f/D ≈ 0.40, on a SPID MD-03 az/el rotator (own controller firmware); locator JO81LC</dd>
+      <dt>Antenna</dt><dd>2.4 m prime-focus dish, f/D ≈ 0.40, on a SPID MD-03 az/el rotator (own controller firmware); locator JO81QO</dd>
       <dt>Feed and LNB</dt><dd>Invacom SNF-031 LNB (LO 9750 MHz) with the ADF-120 corrugated feed for prime-focus dishes (f/D 0.32–0.43)</dd>
       <dt>Receiver</dt><dd>BATC PicoTuner with a Serit FTS-4334LV NIM (STV0910 demodulator, STV6120 tuner, two receivers) and a WIZnet W5500-EVB-Pico Ethernet module</dd>
       <dt>Firmware</dt><dd>Own build of the PicoTuneWH firmware (from G4EWJ's 0v3e source) with a band scanner inside the tuner, extra signal readings and updates over Ethernet</dd>
@@ -31,7 +31,7 @@
 </section>
 
 <section class="spectrum">
-  <canvas id="spec" height="240"></canvas>
+  <canvas id="spec" height="220"></canvas>
   <div class="muted small">Decoded stations; bar height is the MER (about the C/N of a locked signal), width the occupied bandwidth. From the tuner's own scan, not an FFT. Click a station to watch it.</div>
 </section>
 

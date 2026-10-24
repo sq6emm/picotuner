@@ -106,9 +106,9 @@ function cssVar(n) { return getComputedStyle(document.documentElement).getProper
 
 function drawSpectrum(s) {
   const cv = $('spec'), ctx = cv.getContext('2d');
-  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = 240;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = 220;
   cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const pad = { l: 34, r: 8, t: 50, b: 22 }, pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+  const pad = { l: 34, r: 8, t: 36, b: 22 }, pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
   // decoded stations only; height = MER, which for a locked DVB-S2 signal is its C/N above the noise
   const pts = (s.stations || []).map((st) => {
     const m = parseFloat(st.mer);
@@ -127,7 +127,7 @@ function drawSpectrum(s) {
     ctx.beginPath(); ctx.moveTo(pad.l, y(d) + .5); ctx.lineTo(pad.l + pw, y(d) + .5); ctx.stroke();
     ctx.fillText(`${d}`, 8, y(d) + 4);
   }
-  ctx.fillText('MER dB', 4, pad.t - 6);
+  ctx.fillText('MER dB', 4, pad.t - 14);
   // wide symbol rates first, narrow ones on top
   const accent = cssVar('--accent');
   [...pts].sort((a, b) => b.sr - a.sr).forEach((p) => {
