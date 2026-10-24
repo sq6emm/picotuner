@@ -123,7 +123,9 @@ Needs `build/RP2040-HAT-C` at the pinned commit (`sh tools/build/fetch-sdk.sh` c
 pico-sdk 1.4.0) and the image from `tools/build/Dockerfile.focal`
 (`docker build -t picotuner-build:focal -f tools/build/Dockerfile.focal tools/build`). The same
 steps run on GitHub Actions for every push (`.github/workflows/build.yml`: build, tests, images
-as artifacts). Output in `~/work/picotuner/out/`:
+as artifacts). Builds are reproducible: the only date in an image (the SDK's binary_info build
+date) is the date of the last commit (`SOURCE_DATE_EPOCH`), so the same commit gives the same bytes
+locally and on GitHub. Output in `~/work/picotuner/out/`:
 `picotunewh-full.uf2` (ptboot + app, first install over USB), `picotunewh.bin` (updates).
 Without `PTUP_KEY` the key is `picotuner`.
 

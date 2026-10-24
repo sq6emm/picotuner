@@ -11,6 +11,12 @@ set -e
 HATC=/w/build/RP2040-HAT-C
 cd "$HATC"
 python3 /w/tools/build/hatc_patch.py
+# Reproducible images: the only date in them (the SDK's binary_info build date, __DATE__) becomes the
+# date of the last commit, and that file is always recompiled, so a build of the same commit gives
+# the same bytes here and on GitHub Actions.
+[ -n "$SOURCE_DATE_EPOCH" ] || SOURCE_DATE_EPOCH=$(git -c safe.directory='*' -C /w log -1 --format=%ct 2>/dev/null || echo 0)
+export SOURCE_DATE_EPOCH
+touch libraries/pico-sdk/src/rp2_common/pico_standard_link/binary_info.c
 rm -rf examples/picotunewh examples/ptboot examples/common
 cp -r /w/firmware/picotunewh /w/firmware/ptboot /w/firmware/common examples/
 [ -z "$VERSION_TAG" ] || sed -i "s/#define VERSIONX2\t\"[^\"]*\"/#define VERSIONX2\t\"e-$VERSION_TAG\"/" examples/picotunewh/picotunewh.c
