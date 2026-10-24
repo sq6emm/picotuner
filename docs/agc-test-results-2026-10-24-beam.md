@@ -111,3 +111,8 @@ az 0.64 too low and el 0.47 too high; the beam centre in the old rotator angles 
 means the rotator read az -0.06 and el +3.28 against the sky before that recalibration. The Sun
 pointing of 2026-10-24 was off by a similar amount. Beam shapes, peak shifts and the feed work are
 not affected.
+Rotator corrected the same evening (owner's OK): at rest on QO-100 az_pos += 0.644, tilt_dir
+57.559 -> 58.203, el_zero 4.17 -> 3.704, el_min -8.27, el_max 76.73, park_el -3.27, service_el
+56.73 (physical positions unchanged), saved, controller rebooted. Check at the true QO-100
+direction 169.20 / 30.41: centre AGC2 144 (MER 10.5), az -0.4: 144, az +0.4: 146, el -0.4: 150,
+el +0.4: 149. The feed-service position is now shown about el -7.3.
