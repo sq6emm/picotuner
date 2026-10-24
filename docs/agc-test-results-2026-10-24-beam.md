@@ -77,3 +77,14 @@ Astra 2 at 28.2E, about 2.3 deg along the arc): there the automatic LNA VGO read
 on cold sky 31. The noise/peak figures (7.85-8.01 dB) and the transponder hump test are withdrawn.
 Beam shapes from MER and the peak shifts stand. From ota14 on, measurements use AGCHOLD=1 and a
 cold-sky reference above the arc.
+
+## End of 2026-10-24 (feed work paused)
+- Final strut changes: lateral half step after the test step (8 o'clock +6 then +3 mm, 4 o'clock -6
+  then -3 mm); aperture ~950 mm. Azimuth beam symmetric (peak 0.1 deg off the centre of the
+  AGC2-185 span, width 2.59 deg rotator at that level, narrowest so far); elevation slightly
+  broader downwards.
+- QO-100 peak: rotator az ~169.2-169.3, el ~33.45 (true 168.55 / 30.85). One az centre scan
+  from level crossings: 169.13. Rotator zero (az_pos, el_zero) NOT changed yet; changing el_zero
+  by -2.6 also moves the physical place of el_min (-5), so el_min needs moving with it.
+- Sun in the afternoon (az ~220, el ~17, partly behind trees): no response with AGCHOLD=1
+  at 1500 kS/s; at 27.5 MS/s AGC2 does not respond at all (do not use 27.5 MS/s for this).
