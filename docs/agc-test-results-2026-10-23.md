@@ -75,3 +75,20 @@ Fix: `__no_inline_not_in_flash_func(core1_park)` (now at 0x2000042c). Also kept:
 trace points and the 8 s watchdog, which already turned every hang into an automatic reboot.
 Tested in the tuner with the NIM powered: two updates (one during reception), trial, confirmation
 after 60 s, and a rollback after 3 unconfirmed boots (rbtest -> ota11).
+
+## Packet error counter check (2026-10-24, 0v3e-ota13)
+RX1 on the beacon (QPSK 4/5), dish stepped in azimuth away from QO-100 (169.05/31.05), 15 s per
+step, then back. Log: `fw/agc-test/pkterr-test.txt` (not committed).
+
+| rotator az | MER dB | `$39` bad packets | LDPC | BCH / uncorrected | `$38` lock |
+|---|---|---|---|---|---|
+| +0.0 | 11.0 | 0 | 20-35 | 0 / 0 | 63 |
+| +0.5 | 8.4-9.0 | 0 | 250-330 | 0 / 0 | 63 |
+| +0.6 | 6.7-7.1 | 0 | 640-820 | 0 / 0 | 63 |
+| +0.7 | 5.0 -> 4.5 | 933 -> 3685 | 1500-2100 | 12 / 1 | 63, then 15 (FEC lost) |
+| +0.8 | 1.4-0.7 | 3685 (frozen) | ~900 | 12 / 1 | 15 |
+| +0.9..1.1 | - | - | - | - | 0-3 (search, headers) |
+| back | 11.0 | 29 (new lock: reset, a few errors during acquisition) | 20-35 | 0 / 0 | 63 |
+
+`$39` counts: zero with margin, rising from MER about 5 dB, reset at the next lock. `$38` shows
+FEC loss (63 -> 15) before the demodulator loses the signal.
