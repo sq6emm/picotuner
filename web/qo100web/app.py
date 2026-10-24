@@ -117,9 +117,8 @@ class ScanProtocol(asyncio.DatagramProtocol):
             st.update(freq=freq, srate=int(kv.get('srate', 0)), state=kv.get('state', ''),
                       mer=kv.get('mer', ''), modcod=fields_between(line, ' modcod=', ' lock=').strip(),
                       agc2=kv.get('agc2', ''), rx=int(kv.get('rx', 0)), seen=time.time())
-            if name:
-                st['name'] = name
-                st['provider'] = fields_between(line, ' provider=', ' agc1=').strip()
+            st['name'] = name                            # the firmware keeps the names itself (ota18): take
+            st['provider'] = fields_between(line, ' provider=', ' agc1=').strip()   # them as they come, even empty
             for k in ('video', 'audio'):                 # ota15+, known once the TS showed them
                 if kv.get(k):
                     st[k] = kv[k]

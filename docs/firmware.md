@@ -1,4 +1,4 @@
-# PicoTuneWH 0v3e-ota17 (own build)
+# PicoTuneWH 0v3e-ota18 (own build)
 
 G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picotunewh/`, plus:
 
@@ -96,6 +96,21 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
     - the receiver switch-off on idle no longer calls I2C from Core0 (unused, idletime 0);
     - the name-collecting pass (every 10th) only waits for stations without a name yet, and
       names survive the same scan command sent again.
+
+13. **0v3e-ota18**:
+    - fix of an ota17 regression: a cached service name could be the previous station's (its
+      SDT still in the queue right after a retune; the beacon's A71A showed on other channels).
+      Names are now stored only after the long hold and forgotten when the channel goes quiet;
+    - Core1 runs on its own 8 KiB stack (was 4 KiB in SCRATCH_X); `$42` reports the bytes never
+      used so far (about 6000 in the tuner, so ~2.2 KiB is the deepest so far);
+    - memory barriers around the Core0/Core1 mailboxes (`xsr10`, `tur01e`);
+    - wide channels (too few neighbours for a local reference) use the whole pass of that SR
+      as reference instead of always trying a lock;
+    - PMT/SDT parsing bounded to the packet; strings from the TS are never used as formats;
+    - leftovers: unused `setup_eit2`, a duplicate title-bar call, a debug printf, uninitialised
+      `argv`; the unused 512 KiB in the flash layout is documented;
+    - I2C at 400 kHz was tried: the NIM then did not work at all (no status, no scan), so the
+      bus stays at 100 kHz.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):

@@ -11,6 +11,7 @@
 	0x10000000	  32 KiB	ptboot (boot2 + bootloader)
 	0x10008000	 480 KiB	application slot, linked here (its own boot2 copy at the start is unused,
 							vector table at +0x100)
+	0x10080000	 512 KiB	unused (room to grow the slots; the application is ~135 KiB)
 	0x10100000	 480 KiB	staging: a new image received over Ethernet
 	0x10178000	 508 KiB	backup: the previous application, kept for a rollback
 	0x101f7000	   4 KiB	update metadata (one sector)

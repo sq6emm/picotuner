@@ -87,6 +87,7 @@
 #define STATUS_PACKET_ERRORS	  39		// bad TS packets since the lock (error counter 2)
 #define STATUS_CONSTELLATION	  40		// 15 symbols as hex IIQQ pairs (signed bytes)
 #define STATUS_I2C_ERRORS		  41		// failed or timed-out I2C transfers since start (0v3e-ota17)
+#define STATUS_CORE1_STACK_FREE	  42		// Core1 stack never used so far, bytes of 8192 (0v3e-ota18)
 
 #define STATUS_VGX_STATE		  86		// voltage generator state
 #define STATUS_VGY_STATE		  87		// voltage generator state

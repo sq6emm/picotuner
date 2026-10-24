@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota17"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota18"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -418,6 +418,21 @@ volatile	uint32				broadcast_sequence ;
 volatile	uint32				last_broadcast_time ;;
 
 volatile	char				lastincomingcommand [256] ;
+
+#define	CORE1_STACK_WORDS	2048									// 8 KiB
+#define	CORE1_STACK_FILL	0xc0c0c0c0u
+static		uint32_t			core1_stack [CORE1_STACK_WORDS] ;
+
+static uint32_t core1_stack_free (void)							// bytes never touched at the bottom
+{
+	uint32_t	n = 0 ;
+
+	while (n < CORE1_STACK_WORDS && core1_stack [n] == CORE1_STACK_FILL)
+	{
+		n++ ;
+	}
+	return (n * 4) ;
+}
 volatile	char				debuginfo			[256] ;
 
 			char				versionx3U			[16] ;
@@ -858,6 +873,7 @@ static void ota_idle (void)										// while Core0 waits for Core1 to park
 {
 	if (xsr10.status == 1)
 	{
+		__dmb () ;											// flag seen: read the contents after it
 		xsr10.status = 2 ;											// drop the pending send so Core1 can move on
 	}
 }
@@ -896,7 +912,7 @@ static void ota_ts (int stop)
 int __in_flash("my_group_name") main()
 {
 	int32				argc ;
-	char				argv [8] [20] ;
+	char				argv [8] [20] = {{0}} ;					// leftover WinterHill arguments: all empty (0v3e-ota18)
 	int					fd ;
 	FILE				*ip ;
 	uint32				x ;
@@ -1392,7 +1408,8 @@ int __in_flash("my_group_name") main()
 //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
-	rpi2c_init (100000) ;
+	rpi2c_init (100000) ;												// 400 kHz was tried in 0v3e-ota18: the NIM then did
+																		// not work at all (no status, no scan), so 100 kHz stays
 
 	memset (nimspresent,  0, sizeof(nimspresent)) ;			// declared in nim.c
 	memset (xlnaspresent, 0, sizeof(xlnaspresent)) ;		// "
@@ -1580,7 +1597,13 @@ int __in_flash("my_group_name") main()
 		"[to@wh] rcv=2 fplug=a offset=9750000 freq=10491500 srate=1500 "
 	) ;
 
-	multicore_launch_core1 (core1_main) ;                           	// start the second core for NIM interface
+	for (x = 0 ; x < CORE1_STACK_WORDS ; x++)
+	{
+		core1_stack [x] = CORE1_STACK_FILL ;							// to measure how deep Core1 goes ($42)
+	}
+	multicore_launch_core1_with_stack (core1_main, core1_stack, sizeof(core1_stack)) ;	// start the second core for
+																		// the NIM, on its own 8 KiB stack (0v3e-ota18:
+																		// the default 4 KiB in SCRATCH_X was tight)
 
 	sleep_ms (100) ;	
 
@@ -1731,7 +1754,7 @@ void form_broadcast_message (char *buff)
 	}
 	else 
 	{
-		sprintf (buff+strlen(buff), rcv[0].textinfos[STATUS_VGX_STATE]) ;
+		sprintf (buff+strlen(buff), "%s", rcv[0].textinfos[STATUS_VGX_STATE]) ;
 	}
 	sprintf (buff+strlen(buff), "\r\n") ;
 
@@ -1742,7 +1765,7 @@ void form_broadcast_message (char *buff)
 	}
 	else 
 	{
-		sprintf (buff+strlen(buff), rcv[0].textinfos[STATUS_VGY_STATE]) ;
+		sprintf (buff+strlen(buff), "%s", rcv[0].textinfos[STATUS_VGY_STATE]) ;
 	}
 	sprintf (buff+strlen(buff), "\r\n") ;
 	
@@ -1865,6 +1888,7 @@ void mainloop()
 				sleep_ms (100) ;
 				if (xsr10.status == 1)
 				{
+					__dmb () ;											// flag seen: read the contents after it
 					xsr10.status = 2 ;					// ignore send requests from core1
 				}
     		}
@@ -1991,6 +2015,7 @@ void mainloop()
 		
 		if (xsr10.status == 1)											// there is a send request from core 1
 		{
+			__dmb () ;											// flag seen: read the contents after it
 			ota_trace (0, 0x05) ;
 			rx = xsr10.receiver ;
 
@@ -2130,6 +2155,7 @@ void mainloop()
 					ota_trace (0, 0x10) ;
 					tur01e.buffer [status] 	= 0 ;						// terminating zero
 					tur01e.receiver 		= rx ;
+					__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 					tur01e.status			= 1 ;						// signal ready										
 					break ;
 				}
@@ -2162,6 +2188,7 @@ void mainloop()
 									rcv[rx].symbolrates[0],
 									rcv[rx].antenna + '@'									
 								) ; 
+ 				               	__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
  				               	tur01e.status = 1 ;                 	// signal ready to Core1
                                 break ;
 							}												
@@ -2349,6 +2376,7 @@ void inicommand_loop()
 			if (pos)
 			{
 				tur01e.receiver 	= -1 ;					
+				__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 				tur01e.status		= 1 ;							// ready
 			}
 			inicommandnext++ ;
@@ -2383,6 +2411,7 @@ int tsproc_loop (packetblock_t* pbp)
 		uint32		rx ;
 		int32		status ;
 		uint8		*sdtp ;
+		uint8		*sdtend ;
 		uint16		pid ;
 		uint32		length ;
 		uint32		length2 ;
@@ -2440,7 +2469,7 @@ int tsproc_loop (packetblock_t* pbp)
 			{
 				index = 5 ;
 				sectionlength = ((pp[index+1] & 0xf) << 8) + pp[index+2] ;
-				if (sectionlength <= 1 || sectionlength >= 188)
+				if (sectionlength <= 1 || sectionlength > 188 - 8)	// the section must end inside the packet (0v3e-ota18)
 				{
 					sectionlength = 0 ;
 				}
@@ -2484,7 +2513,7 @@ int tsproc_loop (packetblock_t* pbp)
 			{	
 				index = 5 ;
 				sectionlength = ((pp[index+1] & 0xf) << 8) + pp[index+2] ;
-				if (sectionlength <= 1 || sectionlength >= 188)
+				if (sectionlength <= 1 || sectionlength > 188 - 8)	// the section must end inside the packet (0v3e-ota18)
 				{
 					sectionlength = 0 ;
 				}
@@ -2511,7 +2540,7 @@ int tsproc_loop (packetblock_t* pbp)
 						servicetype      = 0 ;								
 
 // look for service types
-						while (index < 0x08 + sectionlength - 4)			
+						while (index < 0x08 + sectionlength - 4 && index + 5 <= 188)	// bounded by the packet too
 						{							
 							servicetype = pp[index] ;					// H264, AAC etc	
 							index++ ;
@@ -2614,7 +2643,7 @@ int tsproc_loop (packetblock_t* pbp)
 			{
 				index = 5 ;
 				sectionlength = ((pp[index+1] & 0xf) << 8) + pp[index+2] ;
-				if (sectionlength <= 1 || sectionlength >= 188)
+				if (sectionlength <= 1 || sectionlength > 188 - 8)	// the section must end inside the packet (0v3e-ota18)
 				{
 					sectionlength = 0 ;
 				}
@@ -2633,7 +2662,12 @@ int tsproc_loop (packetblock_t* pbp)
 						if (*sdtp == 0x48)								// service descriptor
 						{					
 							sdtp += 3 ;									// point to the provider length
-							length = *sdtp++ ;							// provider length
+							sdtend = (uint8*) pp + 8 + sectionlength - 4 ;	// lengths are checked against the
+							length = *sdtp++ ;							// section end (0v3e-ota18)
+							if (sdtp + length + 1 > sdtend)
+							{
+								continue ;
+							}
 							if (length <=  15)
 							{
 								length2 = length ;
@@ -2647,6 +2681,10 @@ int tsproc_loop (packetblock_t* pbp)
 							rcv[rx].textinfos[y][length2] = 0 ;			// terminate the string
 							sdtp += length ;							// point to the service name length 
 							length = *sdtp++ ;							// service name length 
+							if (sdtp + length > sdtend)
+							{
+								continue ;
+							}
 							if (length <=  15)
 							{
 								length2 = length ;
@@ -2974,14 +3012,14 @@ void setup_eit (void *packet, uint32 rx, char* info)
 	strcpy (temps, info) ; 
 	
     *p++ = (uint8) strlen (temps) ;
-	sprintf ((char*)p, temps) ;
+	sprintf ((char*)p, "%s", temps) ;			// the text can come from the TS: not a format
     p += strlen (temps) ;
 
 	y = STATUS_SERVICE_PROVIDER_NAME ;
     strcpy ((char*)temps, rcv[rx].textinfos[y]) ;
 
     *p++ = (uint8) strlen (temps) ;
-	sprintf ((char*)p, temps) ;
+	sprintf ((char*)p, "%s", temps) ;			// the text can come from the TS: not a format
     p += strlen (temps) ;
 
     *(q+2) = (uint8) (p - q - 1 - 2) ;
@@ -3012,118 +3050,6 @@ void setup_eit (void *packet, uint32 rx, char* info)
 //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
-void setup_eit2 (void *packet, uint32 rx, char* info)
-{
-    int				y ;
-    uint8       	*p, *q ;
-    uint        	utempi ;    
-    char        	temps  [256] ;
-	int32			jday ;
-	int32			jhour ;	
-	struct eitx		*eitp ;
-
-	eitp = (struct eitx*) packet ;
-
-    memset ((void*)eitp, 0, sizeof(*eitp)) ;				
-
-    eitp->sync = 0x47 ;
-    eitp->payloadstart 	= 1 ;
-    eitp->adaption 		= 1 ;
-    eitp->pid1208 		= EIT_PID >> 8 ;
-    eitp->pid0700 		= EIT_PID & 0xff ;
-
-	eitp->continuity = rcv[rx].eitcontinuity++ & 0xf ;	// increment continuity
-     
-    eitp->tableid 		= 0x4e ;               				// EIT 'current program' descriptor
-
-    eitp->reserved0 	= 3 ;
-    eitp->filler2 		= 1 ;
-    eitp->syntax 		= 1 ;
-
-	eitp->sectionlength = 0 ;								// fill in later
-
-    eitp->servicehigh 	= (uint8) (rcv[rx].serviceid >> 8) ;						
-    eitp->servicelow  	= (uint8) (rcv[rx].serviceid & 0xff) ;						
-
-    eitp->currentnext 	= 1 ;
-    eitp->reserved1   	= 3 ;
-
-    eitp->version 	 	= rcv[rx].eitversion & 0x1f ;		// table table version
-
-    eitp->tsidhigh  	= (uint8) (TSID >> 8) ;				// TSID = 0; not needed by VLC for EIT					
-    eitp->tsidlow   	= (uint8) (TSID & 0xff) ;						
-    eitp->networkhigh 	= (uint8) (NETWORK >> 8) ;			// NETWORK = 0; not needed by VLC for EIT
-    eitp->networklow  	= (uint8) (NETWORK & 0xff) ;
-    eitp->lasttable 	= 0x4e ;                 			// service descriptor
-    
-    p = (uint8*) &eitp->loop ;
- 
-    *p++ = (uint8) (EVENTID >> 8) ;             			// event id = zero (first event)
-    *p++ = (uint8) (EVENTID & 0xff) ;
-
-    juliandate (&jday,&jhour) ;
-	jhour -= 1 ;											// start at the beginning of the previous hour
-	if (jhour < 0)
-	{
-		jhour += 24 ;
-		jday-- ;
-	}
-    
-    *p++ = (uint8) (jday >> 8) ;                			// start date
-    *p++ = (uint8) (jday & 0xff) ;
-
-	utempi = (jhour / 10) ;									// convert to BCD
-	utempi *= 0x10 ;
-	utempi += (jhour % 10) ;
-
-    *p++ = utempi ;            				       			// start time
-    *p++ = 0x00 ;
-    *p++ = 0x00 ;
-    
-    *p++ = 0x03 ;                           				// duration 3 hours
-    *p++ = 0x00 ;	
-    *p++ = 0x00 ;
-
-    *p++ = 0x80  ;    			                        	// status = running, scrambled = no
-        
-    q = p ;                                     
-
-    *p++ = 0 ;									    		// descriptors loop length - fill in later
-
-    *p++ = 0x4d ;                               			// short descriptor type 
-    
-    *p++ = 0 ;                                  			// descriptor length - fill in later
-
-   	sprintf ((char*)p, "eng") ;
-    p += 3 ;
-
-	strcpy (temps, info) ; 
-	
-    *p++ = (uint8) strlen (temps) ;
-	sprintf ((char*)p, temps) ;
-    p += strlen (temps) ;
-
-	y = STATUS_SERVICE_PROVIDER_NAME ;
-    strcpy ((char*)temps, rcv[rx].textinfos[y]) ;
-
-    *p++ = (uint8) strlen (temps) ;
-	sprintf ((char*)p, temps) ;
-    p += strlen (temps) ;
-
-    *(q+2) = (uint8) (p - q - 1 - 2) ;
-
-    *q = (uint8) (p - q - 1) ;
-    
-    eitp->sectionlength = (uint8) ((uint32)p - (uint) &eitp->sectionlength - 1 + 4) ;
-    
-    utempi = calculateCRC32 ((uint8*)&eitp->tableid,eitp->sectionlength-1) ;
-    *p++ = (uint8) ((utempi >> 24) & 0xff) ;
-    *p++ = (uint8) ((utempi >> 16) & 0xff) ;
-    *p++ = (uint8) ((utempi >>  8) & 0xff) ;
-    *p++ = (uint8) ((utempi >>  0) & 0xff) ;
-
-    memset (p, 0xff, 188-((uint)p-(uint)eitp)) ;	// pad out the rest of the packet
-}
 
 
 void juliandate (int32* julday, int32* julhour)
@@ -3147,7 +3073,7 @@ void juliandate (int32* julday, int32* julhour)
 	month 	= mytime.tm_mon + 1 ;							// returned month = 0-11
 	day 	= mytime.tm_mday ;
 
-	printf ("%d %d %d %d %d %d\r\n",mytime.tm_year,mytime.tm_mon,mytime.tm_mday,mytime.tm_hour,mytime.tm_min,mytime.tm_sec) ; 
+//	printf ("%d %d %d %d %d %d\r\n",mytime.tm_year,mytime.tm_mon,mytime.tm_mday,mytime.tm_hour,mytime.tm_min,mytime.tm_sec) ;	// debug 
 
     utempi 	= DAY0 ;
 
@@ -4207,6 +4133,7 @@ typedef struct
 	uint32		screenms ;							// how long the screen of this pass took
 	uint32		candidates ;
 	int			screenskip ;
+	int			namehold ;							// this lock was held long enough to read the name
 	int32		screenwait ;						// SCANSCREENMS, or SCANSCREEN= in the command
 	uint16		agc2  [SCANMAXF][SCANMAXSR] ;		// screen readings
 	uint8		srmask[SCANMAXF] ;					// bit per symbol rate: tried on this frequency
@@ -4529,6 +4456,7 @@ static void scan_send (int rx, char *text)
 	xsr10.port 		= baseipport + PORTSCAN ;
 	xsr10.typex 	= GENINFOREC ;
 	xsr10.receiver	= rx ;
+	__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 	xsr10.status	= 1 ;
 }
 
@@ -4671,7 +4599,22 @@ static void scan_select (scan_t *s)
 					}
 				}
 			}
-			if (n < 3 || (uint32) s->agc2 [fi][si] * 100 < reference * SCANCARRIER)
+			if (n < 3)														// too few neighbours (the wide channels,
+			{																// 1.5 MHz apart): the whole pass of this SR
+				n = 0 ;														// gives the reference instead of always
+				for (fj = 0 ; fj < s->nf ; fj++)							// trying a lock (0v3e-ota18)
+				{
+					if (s->srmask [fj] & (1 << si))
+					{
+						n++ ;
+						if (s->agc2 [fj][si] > reference)
+						{
+							reference = s->agc2 [fj][si] ;
+						}
+					}
+				}
+			}
+			if (n < 3 || (uint32) s->agc2 [fi][si] * 100 < reference * SCANCARRIER)	// still too few: always try
 			{
 				if ((s->missed [fi] & (1 << si)) && ((s->pass + fi + si) % SCANMISSEVERY) != 0)
 				{
@@ -4684,6 +4627,10 @@ static void scan_select (scan_t *s)
 			{
 				s->missed [fi] &= ~(1 << si) ;							// gone
 			}
+		}
+		if (s->cand [fi] == 0 && s->missed [fi] == 0)					// no carrier on this frequency now: forget
+		{																// its name, a new station there is read afresh
+			s->names [fi][0] = 0 ;										// (0v3e-ota18)
 		}
 	}
 }
@@ -4768,10 +4715,10 @@ static void scan_report (int rx, scan_t *s, uint8 state)
 		strcpy (modcod, modinfo_S[rate].modtext) ;
 	}
 	stv0910_read_agc1_gain (rcv[rx].nimreceiver, &agc1) ;
-	if (rcv[rx].textinfos[STATUS_SERVICE_NAME][0])
-	{
-		strncpy (s->names [s->fi], rcv[rx].textinfos[STATUS_SERVICE_NAME], SCANNAMELEN - 1) ;
-		s->names [s->fi][SCANNAMELEN-1] = 0 ;
+	if (s->namehold && rcv[rx].textinfos[STATUS_SERVICE_NAME][0])	// only after the long hold: right after a
+	{																	// retune the queue can still hold the previous
+		strncpy (s->names [s->fi], rcv[rx].textinfos[STATUS_SERVICE_NAME], SCANNAMELEN - 1) ;	// station's SDT,
+		s->names [s->fi][SCANNAMELEN-1] = 0 ;							// whose name stuck to the new one (ota17)
 	}
 	snprintf
 	(
@@ -4857,6 +4804,7 @@ static void agc_poll (void)
 		xsr10.port 		= baseipport + PORTAGC ;
 		xsr10.typex 	= GENINFOREC ;
 		xsr10.receiver	= rx ;
+		__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 		xsr10.status	= 1 ;
 	}
 }
@@ -4983,6 +4931,7 @@ static void scan_poll (void)
 			case SCAN_HOLD:
 				limit = ((s->pass % SCANNAMEEVERY) == 0 && s->names [s->fi][0] == 0) ? SCANNAMEMS : SCANHOLDMS ;	// a name
 																		// once known is not waited for again (0v3e-ota17)
+				s->namehold = limit == SCANNAMEMS ;
 				if (now - s->t0 < limit || now - s->tpoll < SCANPOLLMS)
 				{
 					break ;
@@ -5102,6 +5051,7 @@ void core1_main()
 		
 		if (tur01e.status == 1)											// ETH command receiver by core 0 
 		{			
+			__dmb () ;											// flag seen: read the contents after it
 			turp = &tur01e ;	
 		}
 		else
@@ -5716,6 +5666,7 @@ void core1_main()
 					}        		
        		   	}
 			}
+			__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 			turp->status = 2 ;											// signal to core 0 that 
 		}																//   the command has been processed
 		ota_trace (1, 0x07) ;
@@ -5805,6 +5756,7 @@ static	uint32			counter ;
 							xsr10.port 		= rcv[rx].expinfoport ;
 							xsr10.typex 	= EXPINFOREC ;
 							xsr10.receiver	= rx ;
+							__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 							xsr10.status	= 1 ;									// ready for processing
 
 							while (xsr10.status == 1) ;
@@ -5813,6 +5765,7 @@ static	uint32			counter ;
 							xsr10.port 		= rcv[rx].expinfo2port ;
 							xsr10.typex 	= EXPINFOREC ;
 							xsr10.receiver	= rx ;
+							__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 							xsr10.status	= 1 ;
 						}
 					}					
@@ -6168,6 +6121,10 @@ static	uint32			counter ;
 					rcv[rx].rawinfos[y] = i2c_errors ;
 					sprintf (rcv[rx].textinfos[y], "%u", (unsigned) i2c_errors) ;
 
+					y = STATUS_CORE1_STACK_FREE ;												// parameter 42
+					rcv[rx].rawinfos[y] = core1_stack_free () ;
+					sprintf (rcv[rx].textinfos[y], "%u", (unsigned) rcv[rx].rawinfos[y]) ;
+
 					y = STATUS_LOCK_FLAGS ;														// parameter 38, also while searching
 					if (stv0910_read_lock_flags (rcv[rx].nimreceiver, !locked_s, &value) == ERROR_NONE)
 					{
@@ -6274,7 +6231,6 @@ static	uint32			counter ;
 // put info into VLC header bar
 
 				setup_titlebar (titlebar, rx) ;										// create the VLC title bar
-				setup_titlebar (titlebar, rx) ;										// create the VLC title bar
 				strcpy (rcv[rx].textinfos[STATUS_TITLEBAR], titlebar) ;				
 
 
@@ -6303,6 +6259,7 @@ static	uint32			counter ;
 							xsr10.port 		= rcv[rx].toport ;
 							xsr10.typex 	= EITREC ;
 							xsr10.receiver	= rx ;
+							__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 							xsr10.status	= 1 ;
 						}
 					}
@@ -6474,6 +6431,7 @@ static	uint32			counter ;
 					xsr10.port 		= rcv[rx].lminfoport ;
 					xsr10.typex		= LMINFOREC ;
 					xsr10.receiver	= rx ;
+					__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 					xsr10.status	= 1 ;									// signal ready
 				}
 			}
@@ -6551,9 +6509,11 @@ static	uint32			counter ;
 						xsr10.port 		= rcv[rx].expinfoport ;
 						xsr10.typex		= EXPINFOREC ;
 						xsr10.receiver	= rx ;
+						__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 						xsr10.status	= 1 ;
 						while (xsr10.status == 1) ;								// wait for core 0 to deal with the last request
 						xsr10.port 		= rcv[rx].expinfo2port ;				// duplicate on another port
+						__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 						xsr10.status	= 1 ;
 
 // duplicate to rx0 for local output					
@@ -6562,9 +6522,11 @@ static	uint32			counter ;
 						while (xsr10.status == 1) ;								// wait for core 0 to deal with the last request
 						xsr10.receiver	= 0 ;
 						xsr10.port 		= rcv[rx].expinfoport ;				// duplicate on another port
+						__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 						xsr10.status	= 1 ;
 						while (xsr10.status == 1) ;								// wait for core 0 to deal with the last request
 						xsr10.port 		= rcv[rx].expinfo2port ;				// duplicate on another port
+						__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 						xsr10.status	= 1 ;
 */
 					}
@@ -6609,9 +6571,11 @@ static	uint32			counter ;
 						}			
 								
 						xsr10.port 			= rcv[rx].summaryport ;
+						__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 						xsr10.status		= 1 ;
 						while (xsr10.status == 1) ;	
 						xsr10.port 			= rcv[rx].summary2port ;
+						__dmb () ;												// mailbox contents before the flag (0v3e-ota18)
 						xsr10.status		= 1 ;
 					}
 				}
