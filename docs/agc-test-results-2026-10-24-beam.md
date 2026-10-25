@@ -185,3 +185,12 @@ el +0.4: 149. The feed-service position is now shown about el -7.3.
   second law, and the Sun (~270 K antenna temperature with the first law) is several times below
   a healthy 2.4 m. The AGC2 scale is therefore not settled; next: two 10 dB DC-pass attenuators
   (Signal R50112) in the IF line, singly and in series, on cold sky with held gain.
+- Dish geometry from an older survey: rim diameter 2310 mm (straight edge across the rim to the
+  centre: depth 365 mm), so focus 913.7 mm and f/D 0.396; surface arc 2455 mm. The horn aperture
+  is ~950 mm from the vertex since the strut work of 2026-10-24 (920 mm before it), i.e. about
+  35-40 mm beyond the focus, more counting the phase centre inside the horn. At f/D 0.4 that is
+  ~0.8 wavelength of phase error at the rim: a likely cause of the low Sun and Moon readings (not
+  of the broad azimuth beam). The 938-vs-950 mm test used the withdrawn AGC2 reference. Next visit:
+  aperture to ~905-915 mm (struts move the feed ~0.43 mm per mm of strut: all three ~15-17 mm
+  shorter, or 12 mm in the clamp plus ~10 mm on the struts), then check the flange-to-rim
+  distances, and redo the held-gain cuts, Sun and Moon.
