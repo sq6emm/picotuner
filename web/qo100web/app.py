@@ -34,7 +34,8 @@ HLS_DIR = Path(os.environ.get('HLS_DIR', '/hls'))
 CHANGE_GAP_S = int(os.environ.get('CHANGE_GAP_S', '15'))
 STATIC = Path(__file__).parent / 'static'
 
-RESEND_S = 240            # the firmware stops sending off-net after 15 min; resend well before
+RESEND_S = 3600           # resending restarts the scans (until 0v3e-ota25 kept the same plan running) and a lost
+                          # command is caught by SCAN_SILENT_S; the 15 min off-net timeout does not apply on the LAN
 SCAN_SILENT_S = 15        # no pass from a scanning receiver for this long: resend its command
 STATION_TTL_S = 30        # a station not reported for this long is dropped from the list
 VIEWER_TTL_S = 12         # a page that stopped polling is no longer a viewer
@@ -137,12 +138,19 @@ class ScanProtocol(asyncio.DatagramProtocol):
             S.passes[rx] = {'time': int(kv.get('time', 0)), 'found': int(kv.get('found', 0)),
                             'screen': int(kv.get('screen', 0)), 'candidates': int(kv.get('candidates', 0)),
                             'at': now}
-            # a station this receiver reported before but not in the pass that just ended has gone:
-            # drop it now instead of after STATION_TTL_S (2-5 s instead of up to 30 s)
+            # a station this receiver reported before but not in the last two passes has gone: drop
+            # it then instead of after STATION_TTL_S (one pass alone made steady stations flicker:
+            # a single pass misses one now and then)
             start = now - S.passes[rx]['time'] / 1000 - 0.5
             for f, st in list(S.stations.items()):
-                if st.get('rx') == rx and st['seen'] < start and not (S.viewing and S.viewing['freq'] == f):
-                    del S.stations[f]
+                if st.get('rx') != rx or (S.viewing and S.viewing['freq'] == f):
+                    continue
+                if st['seen'] >= start:
+                    st['missed'] = 0
+                else:
+                    st['missed'] = st.get('missed', 0) + 1
+                    if st['missed'] >= 2:
+                        del S.stations[f]
 
 
 # MER needed to decode each MODCOD (tenths of dB), as in the firmware's modinfo tables
