@@ -157,6 +157,14 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
     that are not reported come as `[from@wh:SCANREJ] ... why=sr|dup`. The web app now also scans
     250 kS/s in the narrow band and resends a scan command within ~15 s when a receiver stops
     sending passes (after a tuner reboot it used to wait up to 4 min).
+20. **Shorter passes, no restarts (0v3e-ota25)**: a scan command with the same plan as the running
+    scan no longer restarts it (the web app's resend began each time with an empty screen and
+    forgot the names, so stations flickered every 4 minutes); at a channel where a station locked in
+    the last pass only its symbol rate is tried first (the wider SRs timed out on it every pass);
+    each scanning receiver skips what the other one found in its last pass; a new carrier is tried
+    once two screens in a row show it, unless something locked there last pass; lock timeouts come
+    as `SCANREJ ... why=timeout` (msr= then gives the misses in a row). RX1 passes went from 4-9 s
+    to 1.6-3.4 s; against the BATC monitor the list kept 99-100 % of the decodable stations.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):

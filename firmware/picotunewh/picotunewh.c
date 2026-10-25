@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota24"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota25"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -4150,9 +4150,16 @@ typedef struct
 	uint8		cand  [SCANMAXF] ;					// bit per symbol rate: a carrier in the screen
 	uint8		missed[SCANMAXF] ;					// bit per symbol rate: a carrier that did not lock
 	uint8		misscount [SCANMAXF][SCANMAXSR] ;	// how often in a row (back-off, 0v3e-ota24)
+	uint8		energy [SCANMAXF] ;					// bit per SR: a carrier in the last screen (0v3e-ota25)
+	uint8		lockedlast [SCANMAXF] ;				// bit per SR: locked in the last pass
+	uint8		lockednext [SCANMAXF] ;				// bit per SR: locked in this pass
 	int32		lockf [SCANMAXF] ;					// signals found this pass (frequency, SR)
 	int32		locksr[SCANMAXF] ;
 	int			nlock ;
+	int32		lastf  [SCANMAXF] ;					// the locks of the last finished pass, for the
+	int32		lastsr [SCANMAXF] ;					// other receivers' scans (0v3e-ota25)
+	int			nlast ;
+	int			nseed ;								// lockf [0..nseed) came from other receivers
 	char		names [SCANMAXF][SCANNAMELEN] ;		// last service name per frequency
 } scan_t ;
 
@@ -4399,6 +4406,8 @@ static void scan_validate (int rx, scan_t *s)
 		s->srmask [n] = s->srmask [fi] & ~srbad ;
 		memcpy (s->names [n], s->names [fi], SCANNAMELEN) ;
 		memcpy (s->misscount [n], s->misscount [fi], SCANMAXSR) ;
+		s->energy [n] 	 = s->energy [fi] ;
+		s->lockednext [n] = s->lockednext [fi] ;
 		n++ ;
 	}
 	s->nf = n ;
@@ -4439,6 +4448,20 @@ static void scan_command_done (int rx, int good, int32 freqx)
 	{
 		scan_validate (rx, &scanpending) ;
 	}
+	if
+	(
+		good && freqx != 0 && scans [rx].active &&
+		scanpending.nf == scans [rx].nf && scanpending.nsr == scans [rx].nsr &&
+		scanpending.waitms == scans [rx].waitms && scanpending.screenwait == scans [rx].screenwait &&
+		memcmp (scanpending.f, scans [rx].f, scanpending.nf * sizeof (int32)) == 0 &&
+		memcmp (scanpending.sr, scans [rx].sr, scanpending.nsr * sizeof (int32)) == 0 &&
+		memcmp (scanpending.srmask, scans [rx].srmask, scanpending.nf) == 0
+	)
+	{
+		return ;														// the same plan again (the web app resends it
+	}																	// every few minutes): keep the running scan
+																		// and what it learnt; a restart began with an
+																		// empty screen and forgot the names (0v3e-ota25)
 	if (good && freqx != 0 && scanpending.nf && scanpending.nsr)
 	{
 		int		fi ;
@@ -4534,6 +4557,9 @@ static	char	temps [128 + SCANMAXF * SCANMAXSR * 6] ;		// static: Core1 stack is 
 	int		fi ;
 	int		si ;
 
+	s->nlast = s->nlock - s->nseed ;									// only this receiver's own locks: seeds
+	memcpy (s->lastf,  s->lockf  + s->nseed, s->nlast * sizeof (int32)) ;	// passed back and forth would
+	memcpy (s->lastsr, s->locksr + s->nseed, s->nlast * sizeof (int32)) ;	// never expire
 	s->pass++ ;
 	sprintf
 	(
@@ -4581,6 +4607,7 @@ static void scan_select (scan_t *s)
 	int32	d ;
 	uint32	reference ;
 	uint32	every ;
+	uint8	newenergy ;
 
 	s->candidates = 0 ;
 	s->nlock 	  = 0 ;
@@ -4598,10 +4625,26 @@ static void scan_select (scan_t *s)
 			s->locksr [s->nlock] = rcv[fi].symbolrates [rcv[fi].srindex] ;
 			s->nlock++ ;
 		}
+		else if (&scans [fi] != s && scans [fi].active)					// another receiver's scan: what its last
+		{																// pass found (a narrow station inside a
+			for (n = 0 ; n < scans [fi].nlast && s->nlock < SCANMAXF ; n++)	// wide channel of this plan is not
+			{															// tried at the wide SRs every pass,
+				s->lockf  [s->nlock] = scans [fi].lastf  [n] ;			// 0v3e-ota25)
+				s->locksr [s->nlock] = scans [fi].lastsr [n] ;
+				s->nlock++ ;
+			}
+		}
+	}
+	s->nseed = s->nlock ;
+	for (fi = 0 ; fi < s->nf ; fi++)
+	{
+		s->lockedlast [fi] = s->lockednext [fi] ;
+		s->lockednext [fi] = 0 ;
 	}
 	for (fi = 0 ; fi < s->nf ; fi++)
 	{
 		s->cand [fi] = 0 ;
+		newenergy 	 = 0 ;
 		for (si = 0 ; si < s->nsr ; si++)
 		{
 			if ((s->srmask [fi] & (1 << si)) == 0)
@@ -4639,6 +4682,13 @@ static void scan_select (scan_t *s)
 			}
 			if (n < 3 || (uint32) s->agc2 [fi][si] * 100 < reference * SCANCARRIER)	// still too few: always try
 			{
+				newenergy |= 1 << si ;
+				if (n >= 3 && !(s->energy [fi] & (1 << si)) && !(s->lockedlast [fi] & (1 << si)))
+				{
+					continue ;											// first sighting and nothing locked there
+				}														// last pass: wait for a second screen, so
+																		// single noise peaks cost no lock timeout
+																		// (0v3e-ota25)
 				every = s->misscount [fi][si] ? 1u << (s->misscount [fi][si] - 1) : 1 ;
 				if ((s->missed [fi] & (1 << si)) && ((s->pass + fi + si) % every) != 0)
 				{
@@ -4653,6 +4703,12 @@ static void scan_select (scan_t *s)
 				s->misscount [fi][si] = 0 ;
 			}
 		}
+		s->energy [fi] = newenergy ;
+		if (s->cand [fi] & s->lockedlast [fi])							// a station locked here last pass: try only
+		{																// its symbol rate, not the wider ones first,
+			s->candidates -= __builtin_popcount (s->cand [fi] & ~s->lockedlast [fi]) ;	// which time out on it
+			s->cand [fi] &= s->lockedlast [fi] ;						// every pass (0v3e-ota25); if it is gone,
+		}																// all SRs are back in the next pass
 		if (s->cand [fi] == 0 && s->missed [fi] == 0)					// no carrier on this frequency now: forget
 		{																// its name, a new station there is read afresh
 			s->names [fi][0] = 0 ;										// (0v3e-ota18)
@@ -4757,6 +4813,7 @@ static void scan_report (int rx, scan_t *s, uint8 state)
 	scan_send (rx, temps) ;
 	s->missed [s->fi] &= ~(1 << s->si) ;
 	s->misscount [s->fi][s->si] = 0 ;
+	s->lockednext [s->fi] |= 1 << s->si ;
 	if (s->nlock < SCANMAXF)
 	{
 		s->lockf  [s->nlock] = s->repf ;
@@ -5025,6 +5082,9 @@ static void scan_poll (void)
 				if (now - s->t0 >= limit)
 				{
 					s->missed [s->fi] |= 1 << s->si ;
+					s->repoff = 0 ;
+					s->repsr  = s->misscount [s->fi][s->si] ;				// diagnostics: misses in a row so far
+					scan_reject (rx, s, s->header ? "timeout-hdr" : "timeout") ;
 					if ((1u << s->misscount [s->fi][s->si]) < SCANMISSEVERY * 2)
 					{
 						s->misscount [s->fi][s->si]++ ;				// 1, 2, 4, 8, 16 passes
