@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota19"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota20"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -420,7 +420,9 @@ volatile	char				lastincomingcommand [256] ;
 
 #define	CORE1_STACK_WORDS	2048									// 8 KiB
 #define	CORE1_STACK_FILL	0xc0c0c0c0u
-static		uint32_t			core1_stack [CORE1_STACK_WORDS] ;
+static		uint32_t			core1_stack [CORE1_STACK_WORDS] __attribute__ ((aligned (16))) ;	// AAPCS: the stack must be
+																		// 8-byte aligned, or printf mangles doubles (ota19
+																		// showed every %f field as 0 when the array moved)
 
 static uint32_t core1_stack_free (void)							// bytes never touched at the bottom
 {
