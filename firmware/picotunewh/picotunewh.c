@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota21"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota22"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -4747,6 +4747,52 @@ static void scan_report (int rx, scan_t *s, uint8 state)
 }
 
 
+// before a lock is reported (0v3e-ota22): the demodulator searches +-1 MHz for the carrier until the
+// LNB LO error is known (stv0910_setup_carrier_loop), and a DRO LNB can be ~0.5 MHz off, so a channel
+// 500 kHz or 1 MHz from a station locked on that station and reported it a second time. The beacon
+// now calibrates the LO error for the receiver pair (the scanner never did, only RX1/RX3 tuned to it),
+// and a lock whose carrier is more than SR/2 from the channel is not reported: its true frequency goes
+// into the skip list instead. Returns 1 when the lock belongs to this channel.
+
+static int scan_check_carrier (int rx, scan_t *s)
+{
+	int32	cf ;
+	int32	off ;
+	int32	err ;
+	int		pair ;
+
+	GLOBALNIM = rcv[rx].nim ;
+	if (stv0910_read_car_freq (rcv[rx].nimreceiver, &cf) != ERROR_NONE)
+	{
+		return 1 ;													// no reading: report as before
+	}
+	off = cf / 1000 ;												// kHz
+	if (abs (s->f[s->fi] - (int32) qo100beaconfreq) <= 200 && s->sr[s->si] >= 1000)
+	{
+		err = rcv[rx].qo100locerror - off ;							// the same sign as info_loop's beacon mode,
+		if (err == 0)												// with the correction this tune already used
+		{
+			err = 1 ;												// 0 means not calibrated
+		}
+		pair = ((rx - 1) & 2) + 1 ;
+		rcv[pair].qo100locerror 	= err ;
+		rcv[pair + 1].qo100locerror = err ;
+		return 1 ;
+	}
+	if (abs (off) * 2 > s->sr[s->si])
+	{
+		if (s->nlock < SCANMAXF)
+		{
+			s->lockf  [s->nlock] = s->f[s->fi] + (rcv[rx].highsideloc ? -off : off) ;
+			s->locksr [s->nlock] = s->sr[s->si] ;
+			s->nlock++ ;
+		}
+		return 0 ;
+	}
+	return 1 ;
+}
+
+
 // fast signal levels, called from the Core1 loop
 
 static void agc_poll (void)
@@ -4965,8 +5011,11 @@ static void scan_poll (void)
 					{
 						break ;												// MER not valid yet
 					}
-					scan_report (rx, s, state) ;
-					a1 = 1 ;
+					a1 = scan_check_carrier (rx, s) ;
+					if (a1)
+					{
+						scan_report (rx, s, state) ;
+					}
 				}
 				if (scan_next_candidate (s, a1))
 				{

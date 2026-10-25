@@ -131,6 +131,15 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
     until the new SDT arrived, and for good if it never did (the beacon's A71A showed on
     10496.250). The tune command now clears them like the scanner's retune does. The web app also
     ignores names in RX1 status for 5 s after a station change and status from another frequency.
+17. **No double stations after a reboot (0v3e-ota22)**: until the LNB LO error is known the
+    STV0910 searches +-1 MHz for the carrier (`stv0910_setup_carrier_loop`), and only RX1/RX3 tuned
+    to the beacon with the normal command ever measured that error, never the scanner. With this
+    DRO LNB about 470 kHz off, a station was found both on its own channel and on the one 500 kHz
+    above (DK0PU on 10493.250 and 10493.750, R2HX on 10494.250 and 10494.750; RX1 tuned to the
+    empty channel showed `$6` = the neighbour's carrier). Now the scanner's beacon lock sets the LO
+    error for the receiver pair (so the window is +-SR/2 from the first pass on), and a lock whose
+    carrier is more than SR/2 from the channel is not reported; its true frequency goes into the
+    skip list. Found by a code review (Fable) and confirmed on the tuner before the change.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):
