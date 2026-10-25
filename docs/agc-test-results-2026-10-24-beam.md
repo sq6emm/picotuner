@@ -174,13 +174,13 @@ el +0.4: 149. The feed-service position is now shown about el -7.3.
   AGCHOLD=3, so Y = 5.3-5.4 dB (as 1/AGC2^2) in both LNA gain modes. POWERI caps at 255 on the Sun.
   Sun cross -3 dB widths az ~2.0, el ~1.2 deg (disc ~0.6 deg and wind included); az/el ratio as
   on the beacon. Sun centre at az -0.1, el +0.03 deg from the ephemeris.
-- Hot load (absorber on the waveguide mouth of the ADF-120, el -4, AGCHOLD=2, 9 C):
+- Hot load (absorber on the waveguide mouth of the ADF-120, el -4, AGCHOLD=2, 9 C, raining):
   reference (no absorber) AGC2 397-402 (5 times); transverter-lid absorber 490/489 (less power
   than the ground view: it reflects, the feed then sees the LNA's own cold input noise; unusable);
   8 mm black antistatic foam 362; the same foam backed with aluminium foil 343.5/341 (best,
   repeatable). Cold sky: el 50 657, el 70 633.
 - Hot (foam + foil, 282 K) / cold (el 50): AGC2 ratio 1.92. As 1/AGC2^2: Y = 5.67 dB, with an
-  assumed 25 K antenna temperature on cold sky T_LNB ~70 K and T_sys ~95 K (plausible). As
+  assumed 25 K antenna temperature on cold sky (rain raises it, and water on the feed adds noise) T_LNB ~70 K and T_sys ~95 K (plausible). As
   1/AGC2: Y = 2.83 dB, T_LNB ~250 K (unlikely). But POWERI gave 77 / 147, which as power fits the
   second law, and the Sun (~270 K antenna temperature with the first law) is several times below
   a healthy 2.4 m. The AGC2 scale is therefore not settled; next: two 10 dB DC-pass attenuators
