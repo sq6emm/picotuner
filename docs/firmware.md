@@ -140,6 +140,12 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
     error for the receiver pair (so the window is +-SR/2 from the first pass on), and a lock whose
     carrier is more than SR/2 from the channel is not reported; its true frequency goes into the
     skip list. Found by a code review (Fable) and confirmed on the tuner before the change.
+18. **The rest of that review (0v3e-ota23)**: a scanner lock whose measured symbol rate is more
+    than 20 % from the tried one is not reported (that SR is not the station's; the right one is
+    tried at the same channel too); other receivers' locks go into the skip list at their measured
+    carrier frequency; a restarted receiver's queued TS blocks are returned to the free chain, so
+    no PAT/PMT/SDT from before a retune is parsed; the scanner reports the provider only after the
+    long hold, like the name; `programcount` is reset on every tune.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):

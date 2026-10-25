@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota22"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota23"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -2045,6 +2045,12 @@ void mainloop()
 					dma_channel_set_irq0_enabled (rcv[rx].piodmachan[y], false);	// disable DMA interrupts for this channel
 					dma_channel_abort (rcv[rx].piodmachan[y]) ;                       
 				}
+				dma_interrupts_off() ;
+				while ((packetblockptr = getfromchain (&rcv[rx].rxchain)) != 0)	// blocks received before the
+				{																// retune: they can carry the previous
+					addtochain (&freechain, packetblockptr) ;					// station's PAT/PMT/SDT (0v3e-ota23)
+				}
+				dma_interrupts_on() ;
 				for (y = 0 ; y < 2 ; y++)
 				{
 					dma_hw->ch[rcv[rx].piodmachan[y]].write_addr = (uint32) &rcv[rx].piodmapacketblock[y]->buffer ;					// save the buffer address
@@ -4495,6 +4501,7 @@ static void scan_tune (int rx, int32 freq, int32 sr)
 	rcv[rx].lastmodulation	= 0 ;
 	rcv[rx].signalacquiredtime = 0 ;
 	rcv[rx].signallosttime 	= 0 ;
+	rcv[rx].programcount								= 0 ;
 	rcv[rx].textinfos[STATUS_SERVICE_NAME][0] 			= 0 ;
 	rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME][0] 	= 0 ;
 	rcv[rx].textinfos[STATUS_VIDEO_TYPE][0] 			= 0 ;			// codecs come from this station's TS
@@ -4578,7 +4585,9 @@ static void scan_select (scan_t *s)
 			(rcv[fi].scanstate == STATE_DEMOD_S2 || rcv[fi].scanstate == STATE_DEMOD_S)
 		)
 		{
-			s->lockf  [s->nlock] = rcv[fi].requestedfreq ;
+			s->lockf  [s->nlock] = rcv[fi].rawinfos [STATUS_CARRIER_FREQUENCY] ?	// the measured carrier
+								   rcv[fi].rawinfos [STATUS_CARRIER_FREQUENCY] :	// (0v3e-ota23)
+								   rcv[fi].requestedfreq ;
 			s->locksr [s->nlock] = rcv[fi].symbolrates [rcv[fi].srindex] ;
 			s->nlock++ ;
 		}
@@ -4733,7 +4742,7 @@ static void scan_report (int rx, scan_t *s, uint8 state)
 		"[from@wh:SCAN] rx=%d freq=%d srate=%d state=%s mer=%s modcod=%s lock=%u name=%s provider=%s agc1=%u agc2=%u video=%s audio=%s\r\n",
 		rx + rxbase, s->f[s->fi], s->sr[s->si], state == STATE_DEMOD_S2 ? "DVB-S2" : "DVB-S",
 		mer, modcod, (unsigned) s->tlock, s->names [s->fi],
-		rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME], agc1, s->agc2 [s->fi][s->si],
+		s->namehold ? rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME] : "", agc1, s->agc2 [s->fi][s->si],
 		rcv[rx].textinfos[STATUS_VIDEO_TYPE], rcv[rx].textinfos[STATUS_AUDIO_TYPE]
 	) ;
 	scan_send (rx, temps) ;
@@ -4759,6 +4768,8 @@ static int scan_check_carrier (int rx, scan_t *s)
 	int32	cf ;
 	int32	off ;
 	int32	err ;
+	int32	dsr ;
+	uint32	fsr ;
 	int		pair ;
 
 	GLOBALNIM = rcv[rx].nim ;
@@ -4767,6 +4778,14 @@ static int scan_check_carrier (int rx, scan_t *s)
 		return 1 ;													// no reading: report as before
 	}
 	off = cf / 1000 ;												// kHz
+	if (stv0910_read_sr (rcv[rx].nimreceiver, &fsr) == ERROR_NONE && fsr)
+	{
+		dsr = (int32) (fsr / 1000) - s->sr[s->si] ;					// kS/s
+		if (abs (dsr) * 5 > s->sr[s->si])							// locked a signal of another symbol rate
+		{															// (0v3e-ota23): not this SR; the right
+			return 0 ;												// one is tried at this channel as well
+		}
+	}
 	if (abs (s->f[s->fi] - (int32) qo100beaconfreq) <= 200 && s->sr[s->si] >= 1000)
 	{
 		err = rcv[rx].qo100locerror - off ;							// the same sign as info_loop's beacon mode,
@@ -5609,6 +5628,7 @@ void core1_main()
 						rcv[rx].scanstate       = 0 ;
 						rcv[rx].requestedprog	= reqprogx ;
    	            		rcv[rx].forbidden 	    = 0 ;
+						rcv[rx].programcount								= 0 ;
 						rcv[rx].textinfos[STATUS_SERVICE_NAME][0] 			= 0 ;	// a direct retune from one locked
 						rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME][0] 	= 0 ;	// station to another never lost
 						rcv[rx].textinfos[STATUS_VIDEO_TYPE][0] 			= 0 ;	// lock, so the old name stayed until
