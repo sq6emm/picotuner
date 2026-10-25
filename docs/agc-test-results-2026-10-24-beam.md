@@ -161,3 +161,27 @@ el +0.4: 149. The feed-service position is now shown about el -7.3.
   like 1.4 m" (from AGCHOLD=1 and MER cuts) is withdrawn. Next visit: at several axial feed
   positions measure the az and el widths separately (different best positions = astigmatism),
   and check the feed tilt in azimuth.
+
+## 2026-10-25: peak search, wind, Sun and absorber (firmware ota20; strong wind, overcast)
+- ota19 printed every `%f` status field (MER, D, frequency) as 0; fixed in ota20 (Core1 stack
+  alignment, docs/firmware.md entry 15). AGC2 readings were integers and were not affected.
+- Beacon peak, 7x7 grid at 0.1 deg, AGCHOLD=2: paraboloid peak az 169.00 el 30.31, +0.2 dB vs
+  169.20 / 30.41 with 0.19 dB rms scatter (wind), so the calibration holds. Dish left at
+  169.03 / 30.32.
+- 5 min beacon log: +-0.2-0.3 dB within 15 s, one 75 s dip of -0.6 dB, sd 0.31 dB (power from
+  AGC2 as 1/AGC2^2). Probably wind, not proven; a calm-day log is the reference still missing.
+- Sun (10501 MHz, 1500 kS/s, el 24-25): on/off AGC2 186/342 with AGCHOLD=2 and 181/337 with
+  AGCHOLD=3, so Y = 5.3-5.4 dB (as 1/AGC2^2) in both LNA gain modes. POWERI caps at 255 on the Sun.
+  Sun cross -3 dB widths az ~2.0, el ~1.2 deg (disc ~0.6 deg and wind included); az/el ratio as
+  on the beacon. Sun centre at az -0.1, el +0.03 deg from the ephemeris.
+- Hot load (absorber on the waveguide mouth of the ADF-120, el -4, AGCHOLD=2, 9 C):
+  reference (no absorber) AGC2 397-402 (5 times); transverter-lid absorber 490/489 (less power
+  than the ground view: it reflects, the feed then sees the LNA's own cold input noise; unusable);
+  8 mm black antistatic foam 362; the same foam backed with aluminium foil 343.5/341 (best,
+  repeatable). Cold sky: el 50 657, el 70 633.
+- Hot (foam + foil, 282 K) / cold (el 50): AGC2 ratio 1.92. As 1/AGC2^2: Y = 5.67 dB, with an
+  assumed 25 K antenna temperature on cold sky T_LNB ~70 K and T_sys ~95 K (plausible). As
+  1/AGC2: Y = 2.83 dB, T_LNB ~250 K (unlikely). But POWERI gave 77 / 147, which as power fits the
+  second law, and the Sun (~270 K antenna temperature with the first law) is several times below
+  a healthy 2.4 m. The AGC2 scale is therefore not settled; next: two 10 dB DC-pass attenuators
+  (Signal R50112) in the IF line, singly and in series, on cold sky with held gain.
