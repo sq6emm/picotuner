@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota20"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota21"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -5560,6 +5560,12 @@ void core1_main()
 						rcv[rx].scanstate       = 0 ;
 						rcv[rx].requestedprog	= reqprogx ;
    	            		rcv[rx].forbidden 	    = 0 ;
+						rcv[rx].textinfos[STATUS_SERVICE_NAME][0] 			= 0 ;	// a direct retune from one locked
+						rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME][0] 	= 0 ;	// station to another never lost
+						rcv[rx].textinfos[STATUS_VIDEO_TYPE][0] 			= 0 ;	// lock, so the old name stayed until
+						rcv[rx].textinfos[STATUS_AUDIO_TYPE][0] 			= 0 ;	// the new SDT came, and forever if it
+						rcv[rx].rawinfos[STATUS_VIDEO_TYPE] 				= 0 ;	// never did (0v3e-ota21)
+						rcv[rx].rawinfos[STATUS_AUDIO_TYPE] 				= 0 ;
 
 						{
 							rcv[rx].modechanges++ ;									// count a mode change

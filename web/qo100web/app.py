@@ -341,13 +341,21 @@ def viewed_station(now):
     v, st = S.viewing, S.status[1]
     if not v or now - st.get('at', 0) > 5 or st.get('state') not in ('DVB-S2', 'DVB-S'):
         return
+    try:
+        if abs(float(st.get('freq', '')) * 1000 - v['freq']) > 300:      # status from before the retune
+            return
+    except ValueError:
+        return
     e = S.stations.get(v['freq'], {'first': now})
     e.update(freq=v['freq'], srate=v['srate'], state=st['state'], mer=st['mer'], modcod=st['modcod'],
              rx=1, seen=now, d=decode_margin(st['mer'], st['modcod']),
              capacity=capacity_kbps(v['srate'], st['modcod'], st['state']))
-    for k in ('name', 'provider', 'video', 'audio'):
-        if st.get(k):
-            e[k] = st[k]
+    # the first seconds after a retune can still carry the previous station's name and codecs
+    # (firmware before 0v3e-ota21 kept them across a direct retune)
+    if now - v['since'] > 5:
+        for k in ('name', 'provider', 'video', 'audio'):
+            if st.get(k):
+                e[k] = st[k]
     e.setdefault('agc2', '')
     S.stations[v['freq']] = e
 

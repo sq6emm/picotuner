@@ -125,6 +125,12 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
     placed it on a 4-byte boundary. The ARM procedure call standard needs an 8-byte aligned stack,
     and printf reads double varargs wrongly without it. The array is now `aligned (16)`. Builds
     ota17/ota18 happened to get an 8-byte aligned address.
+16. **Names cleared on every retune (0v3e-ota21)**: ota18 fixed stale names in the scanner, but the
+    normal tune command (watching a station) still kept the service name, provider and codecs of
+    the previous station when it went straight from one locked station to another: they stayed
+    until the new SDT arrived, and for good if it never did (the beacon's A71A showed on
+    10496.250). The tune command now clears them like the scanner's retune does. The web app also
+    ignores names in RX1 status for 5 s after a station change and status from another frequency.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):
