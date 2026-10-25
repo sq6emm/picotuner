@@ -194,3 +194,21 @@ el +0.4: 149. The feed-service position is now shown about el -7.3.
   aperture to ~905-915 mm (struts move the feed ~0.43 mm per mm of strut: all three ~15-17 mm
   shorter, or 12 mm in the clamp plus ~10 mm on the struts), then check the flange-to-rim
   distances, and redo the held-gain cuts, Sun and Moon.
+
+## 2026-10-25 ~16:10-16:50: feed centred and brought to the focus (raining)
+- Before: horn aperture 945-950 mm from the vertex; rim-to-feed-centre 12 o'clock 1320, 4 o'clock
+  1287.5, 8 o'clock 1320 mm (seen from behind), i.e. the feed ~21 mm right and ~12 mm down. Struts
+  (anchor to bracket) 12: 1016, 4: 1008, 8: 1031 mm. The strut anchors in the dish are not
+  symmetric (from a front photo: top ~0.57 m from the centre at 0 deg, the others ~0.65 m at
+  ~123 / ~233 deg), so equal struts never meant a centred feed.
+- Change: struts set to 12: 976, 4: 991, 8: 993 mm, then 4 +5 and 8 -5 mm. After: aperture
+  910 mm (focus 913.7); rim distances 1290 / 1295-1300 / 1290 mm, feed within ~5 mm of the axis.
+- Beam moved as predicted (feed left and up = beam right and down): peak now rotator az ~167.95,
+  el ~31.03 (was 169.03 / 30.32). The rotator still has to be recalibrated on it.
+- Beacon vs cold sky 5 deg above, each with the hold taken at the peak (1/AGC2^2): before 16.24 dB
+  (149 / 967); after 17.30 dB at the cut centre (166 / 1216) and 18.4 dB at the el-cut maximum
+  (146), so about +1-2 dB, measured in heavier rain than the reference (warmer sky, so if
+  anything understated).
+- Held-gain cuts after (sky offsets, -3 dB): az 0.90 deg (-0.39 .. +0.51), symmetric, was 1.6 deg
+  with a shoulder; el 1.03 deg (centre +0.33 from the cut centre), with a shoulder at about -6 dB
+  below the beam. Theory for 2.31 m: ~0.86 deg. Data: scratch cut-after.csv (not kept in the repo).
