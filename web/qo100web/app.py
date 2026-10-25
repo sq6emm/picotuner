@@ -127,10 +127,16 @@ class ScanProtocol(asyncio.DatagramProtocol):
             st.setdefault('first', time.time())
             S.stations[freq] = st
         elif line.startswith('[from@wh:SCANPASS]'):
-            rx = int(kv.get('rx', 0))
+            rx, now = int(kv.get('rx', 0)), time.time()
             S.passes[rx] = {'time': int(kv.get('time', 0)), 'found': int(kv.get('found', 0)),
                             'screen': int(kv.get('screen', 0)), 'candidates': int(kv.get('candidates', 0)),
-                            'at': time.time()}
+                            'at': now}
+            # a station this receiver reported before but not in the pass that just ended has gone:
+            # drop it now instead of after STATION_TTL_S (2-5 s instead of up to 30 s)
+            start = now - S.passes[rx]['time'] / 1000 - 0.5
+            for f, st in list(S.stations.items()):
+                if st.get('rx') == rx and st['seen'] < start and not (S.viewing and S.viewing['freq'] == f):
+                    del S.stations[f]
 
 
 # MER needed to decode each MODCOD (tenths of dB), as in the firmware's modinfo tables
