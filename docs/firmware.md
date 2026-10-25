@@ -146,6 +146,17 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
     carrier frequency; a restarted receiver's queued TS blocks are returned to the free chain, so
     no PAT/PMT/SDT from before a retune is parsed; the scanner reports the provider only after the
     long hold, like the name; `programcount` is reset on every tune.
+19. **Closer to the BATC monitor (0v3e-ota24)**, from 35 min of side-by-side logs against the
+    BATC wideband monitor's own signal detection: a lock whose carrier is between channels (e.g. a
+    500 kS/s station on 10495.500) is reported at its measured frequency (25 kHz steps) instead of
+    being dropped, unless a found station is already there; with the LO calibrated the scanner
+    searches +-3/4 SR around each channel (the normal tune keeps +-SR/2); a carrier that did not
+    lock is retried after 1, 2, 4, 8 and then every 16 passes (was every 16th at once: a station
+    whose first try failed while it was starting up stayed hidden for over a minute); `SCAN` lines
+    carry the carrier offset (`off=`, kHz) and the measured symbol rate (`msr=`, kS/s), and locks
+    that are not reported come as `[from@wh:SCANREJ] ... why=sr|dup`. The web app now also scans
+    250 kS/s in the narrow band and resends a scan command within ~15 s when a receiver stops
+    sending passes (after a tuner reboot it used to wait up to 4 min).
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):

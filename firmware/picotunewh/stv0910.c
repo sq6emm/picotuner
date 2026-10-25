@@ -955,8 +955,8 @@ uint8_t stv0910_setup_carrier_loop (uint8_t tunerdemod, uint32_t sr, uint32_t ca
 
 	if (calibrated)
 	{
-		temp = sr / 2 ;										// uint64_t
-	}
+		temp = calibrated == 2 ? sr * 3 / 4 : sr / 2 ;		// 2: the band scanner, which places a carrier
+	}														// between channels itself (0v3e-ota24)
 	else
 	{
 		temp = 1000 ;										// default to +/- 1MHz

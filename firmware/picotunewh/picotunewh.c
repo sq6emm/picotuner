@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota23"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota24"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -4134,6 +4134,9 @@ typedef struct
 	uint32		t0 ;
 	uint32		tpoll ;
 	uint32		tlock ;
+	int32		repf ;								// frequency reported for this lock (0v3e-ota24)
+	int32		repoff ;							// carrier offset of this lock, kHz
+	uint32		repsr ;								// measured symbol rate, kS/s
 	uint32		pass ;
 	uint32		found ;
 	uint32		passstart ;
@@ -4146,6 +4149,7 @@ typedef struct
 	uint8		srmask[SCANMAXF] ;					// bit per symbol rate: tried on this frequency
 	uint8		cand  [SCANMAXF] ;					// bit per symbol rate: a carrier in the screen
 	uint8		missed[SCANMAXF] ;					// bit per symbol rate: a carrier that did not lock
+	uint8		misscount [SCANMAXF][SCANMAXSR] ;	// how often in a row (back-off, 0v3e-ota24)
 	int32		lockf [SCANMAXF] ;					// signals found this pass (frequency, SR)
 	int32		locksr[SCANMAXF] ;
 	int			nlock ;
@@ -4394,6 +4398,7 @@ static void scan_validate (int rx, scan_t *s)
 		s->f [n] 	  = s->f [fi] ;
 		s->srmask [n] = s->srmask [fi] & ~srbad ;
 		memcpy (s->names [n], s->names [fi], SCANNAMELEN) ;
+		memcpy (s->misscount [n], s->misscount [fi], SCANMAXSR) ;
 		n++ ;
 	}
 	s->nf = n ;
@@ -4510,7 +4515,7 @@ static void scan_tune (int rx, int32 freq, int32 sr)
 	rcv[rx].rawinfos[STATUS_AUDIO_TYPE] 				= 0 ;
 	sprintf (rcv[rx].textinfos[STATUS_FREQ_REQUESTED], "%.3f", (float) freq / 1000) ;
 
-	calibrated = rcv[rx].qo100locerror && rcv[rx].qo100mode != QO100NO ;
+	calibrated = (rcv[rx].qo100locerror && rcv[rx].qo100mode != QO100NO) ? 2 : 0 ;	// 2: the scanner's +-3/4 SR window
 	GLOBALNIM = rcv[rx].nim ;
 	stv6120_init (rcv[rx].nimreceiver, rcv[rx].hardwarefreq, rcv[rx].antenna, sr) ;
 	stv0910_setup_receive (rcv[rx].nimreceiver, sr, calibrated) ;
@@ -4563,8 +4568,9 @@ static	char	temps [128 + SCANMAXF * SCANMAXSR * 6] ;		// static: Core1 stack is 
 
 // after the screen: mark the candidates. The noise floor is not flat over the band (AGC2 about 320
 // at 10492.75 and 200 at 10498.25 MHz, 2026-10-24), so the reference is local: the highest AGC2
-// (least power) of the same symbol rate within SCANLOCALKHZ. A carrier that did not lock last time
-// is tried again only every SCANMISSEVERY-th pass.
+// (least power) of the same symbol rate within SCANLOCALKHZ. A carrier that did not lock is tried
+// again after 1, 2, 4, 8 and then every SCANMISSEVERY passes (0v3e-ota24: was every 16th at once, so
+// a station whose first try failed, e.g. while it was starting up, stayed hidden for over a minute).
 
 static void scan_select (scan_t *s)
 {
@@ -4574,6 +4580,7 @@ static void scan_select (scan_t *s)
 	int		n ;
 	int32	d ;
 	uint32	reference ;
+	uint32	every ;
 
 	s->candidates = 0 ;
 	s->nlock 	  = 0 ;
@@ -4632,7 +4639,8 @@ static void scan_select (scan_t *s)
 			}
 			if (n < 3 || (uint32) s->agc2 [fi][si] * 100 < reference * SCANCARRIER)	// still too few: always try
 			{
-				if ((s->missed [fi] & (1 << si)) && ((s->pass + fi + si) % SCANMISSEVERY) != 0)
+				every = s->misscount [fi][si] ? 1u << (s->misscount [fi][si] - 1) : 1 ;
+				if ((s->missed [fi] & (1 << si)) && ((s->pass + fi + si) % every) != 0)
 				{
 					continue ;											// did not lock before: not every pass,
 				}														// spread over the passes
@@ -4642,6 +4650,7 @@ static void scan_select (scan_t *s)
 			else
 			{
 				s->missed [fi] &= ~(1 << si) ;							// gone
+				s->misscount [fi][si] = 0 ;
 			}
 		}
 		if (s->cand [fi] == 0 && s->missed [fi] == 0)					// no carrier on this frequency now: forget
@@ -4739,17 +4748,18 @@ static void scan_report (int rx, scan_t *s, uint8 state)
 	snprintf
 	(
 		temps, sizeof(temps),
-		"[from@wh:SCAN] rx=%d freq=%d srate=%d state=%s mer=%s modcod=%s lock=%u name=%s provider=%s agc1=%u agc2=%u video=%s audio=%s\r\n",
-		rx + rxbase, s->f[s->fi], s->sr[s->si], state == STATE_DEMOD_S2 ? "DVB-S2" : "DVB-S",
+		"[from@wh:SCAN] rx=%d freq=%d srate=%d state=%s mer=%s modcod=%s lock=%u name=%s provider=%s agc1=%u agc2=%u video=%s audio=%s off=%d msr=%u\r\n",
+		rx + rxbase, s->repf, s->sr[s->si], state == STATE_DEMOD_S2 ? "DVB-S2" : "DVB-S",
 		mer, modcod, (unsigned) s->tlock, s->names [s->fi],
 		s->namehold ? rcv[rx].textinfos[STATUS_SERVICE_PROVIDER_NAME] : "", agc1, s->agc2 [s->fi][s->si],
-		rcv[rx].textinfos[STATUS_VIDEO_TYPE], rcv[rx].textinfos[STATUS_AUDIO_TYPE]
+		rcv[rx].textinfos[STATUS_VIDEO_TYPE], rcv[rx].textinfos[STATUS_AUDIO_TYPE], (int) s->repoff, (unsigned) s->repsr
 	) ;
 	scan_send (rx, temps) ;
 	s->missed [s->fi] &= ~(1 << s->si) ;
+	s->misscount [s->fi][s->si] = 0 ;
 	if (s->nlock < SCANMAXF)
 	{
-		s->lockf  [s->nlock] = s->f  [s->fi] ;
+		s->lockf  [s->nlock] = s->repf ;
 		s->locksr [s->nlock] = s->sr [s->si] ;
 		s->nlock++ ;
 	}
@@ -4763,27 +4773,49 @@ static void scan_report (int rx, scan_t *s, uint8 state)
 // and a lock whose carrier is more than SR/2 from the channel is not reported: its true frequency goes
 // into the skip list instead. Returns 1 when the lock belongs to this channel.
 
+static void scan_reject (int rx, scan_t *s, const char *why)		// diagnostics: a lock not reported
+{
+	char	temps [128] ;
+
+	snprintf
+	(
+		temps, sizeof(temps), "[from@wh:SCANREJ] rx=%d freq=%d srate=%d why=%s off=%d msr=%u\r\n",
+		rx + rxbase, s->f[s->fi], s->sr[s->si], why, (int) s->repoff, (unsigned) s->repsr
+	) ;
+	scan_send (rx, temps) ;
+}
+
+
 static int scan_check_carrier (int rx, scan_t *s)
 {
 	int32	cf ;
 	int32	off ;
 	int32	err ;
 	int32	dsr ;
+	int32	tf ;
+	int32	d ;
 	uint32	fsr ;
 	int		pair ;
+	int		x ;
 
 	GLOBALNIM = rcv[rx].nim ;
+	s->repf   = s->f[s->fi] ;
+	s->repoff = 0 ;
+	s->repsr  = s->sr[s->si] ;
 	if (stv0910_read_car_freq (rcv[rx].nimreceiver, &cf) != ERROR_NONE)
 	{
 		return 1 ;													// no reading: report as before
 	}
 	off = cf / 1000 ;												// kHz
+	s->repoff = off ;
 	if (stv0910_read_sr (rcv[rx].nimreceiver, &fsr) == ERROR_NONE && fsr)
 	{
-		dsr = (int32) (fsr / 1000) - s->sr[s->si] ;					// kS/s
+		s->repsr = fsr / 1000 ;
+		dsr = (int32) s->repsr - s->sr[s->si] ;						// kS/s
 		if (abs (dsr) * 5 > s->sr[s->si])							// locked a signal of another symbol rate
 		{															// (0v3e-ota23): not this SR; the right
-			return 0 ;												// one is tried at this channel as well
+			scan_reject (rx, s, "sr") ;								// one is tried at this channel as well
+			return 0 ;
 		}
 	}
 	if (abs (s->f[s->fi] - (int32) qo100beaconfreq) <= 200 && s->sr[s->si] >= 1000)
@@ -4798,19 +4830,23 @@ static int scan_check_carrier (int rx, scan_t *s)
 		rcv[pair + 1].qo100locerror = err ;
 		return 1 ;
 	}
-	if (abs (off) * 2 > s->sr[s->si])
-	{
-		if (s->nlock < SCANMAXF)
+	if (abs (off) * 2 > s->sr[s->si])								// the carrier is between channels or
+	{																// on the next one (0v3e-ota24)
+		tf = s->f[s->fi] + (rcv[rx].highsideloc ? -off : off) ;
+		tf = ((tf + 12) / 25) * 25 ;								// 25 kHz steps: the same station keeps
+		for (x = 0 ; x < s->nlock ; x++)							// one frequency from pass to pass
 		{
-			s->lockf  [s->nlock] = s->f[s->fi] + (rcv[rx].highsideloc ? -off : off) ;
-			s->locksr [s->nlock] = s->sr[s->si] ;
-			s->nlock++ ;
+			d = tf - s->lockf [x] ;
+			if (abs (d) < ((s->locksr [x] + s->sr [s->si]) * 675) / 1000)
+			{
+				scan_reject (rx, s, "dup") ;						// a station already found
+				return 0 ;
+			}
 		}
-		return 0 ;
+		s->repf = tf ;												// off the channel plan: report it where it is
 	}
 	return 1 ;
 }
-
 
 // fast signal levels, called from the Core1 loop
 
@@ -4989,6 +5025,10 @@ static void scan_poll (void)
 				if (now - s->t0 >= limit)
 				{
 					s->missed [s->fi] |= 1 << s->si ;
+					if ((1u << s->misscount [s->fi][s->si]) < SCANMISSEVERY * 2)
+					{
+						s->misscount [s->fi][s->si]++ ;				// 1, 2, 4, 8, 16 passes
+					}
 					if (scan_next_candidate (s, 0))
 					{
 						s->phase = SCAN_LOCKTUNE ;

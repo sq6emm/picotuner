@@ -35,15 +35,17 @@ CHANGE_GAP_S = int(os.environ.get('CHANGE_GAP_S', '15'))
 STATIC = Path(__file__).parent / 'static'
 
 RESEND_S = 240            # the firmware stops sending off-net after 15 min; resend well before
+SCAN_SILENT_S = 15        # no pass from a scanning receiver for this long: resend its command
 STATION_TTL_S = 30        # a station not reported for this long is dropped from the list
 VIEWER_TTL_S = 12         # a page that stopped polling is no longer a viewer
 
 # QO-100 WB bandplan (wiki.batc.org.uk/QO-100_WB_Bandplan): beacon + wide channels at 1500/1000,
-# narrow channels every 500 kHz at 333 kS/s, 500 kS/s only up to 10496.75 MHz.
+# narrow channels every 500 kHz at 333 and 250 kS/s, 500 kS/s only up to 10496.75 MHz. Stations between
+# channels are reported by the firmware (0v3e-ota24) at their measured frequency.
 WIDE = '10491500,10493250,10494750,10496250'
-PLAN_ONE = f'{WIDE};10492750-10496750/500;10497250-10499250/500:1500,1000;500,333;333'
+PLAN_ONE = f'{WIDE};10492750-10496750/500;10497250-10499250/500:1500,1000;500,333;333,250'
 PLAN_TWO = {1: f'{WIDE};10492750-10494750/500:1500,1000;500,333',
-            2: '10495250-10496750/500;10497250-10499250/500:500,333;333'}
+            2: '10495250-10496750/500;10497250-10499250/500:500,333;333,250'}
 
 
 class State:
@@ -57,6 +59,7 @@ class State:
         self.mode = None
         self.ffmpeg = None
         self.last_change = 0.0
+        self.rejects = {}          # (rx, freq, srate, why) -> count, logged once a minute
 
 
 S = State()
@@ -126,6 +129,9 @@ class ScanProtocol(asyncio.DatagramProtocol):
             st['capacity'] = capacity_kbps(st['srate'], st['modcod'], st['state'])
             st.setdefault('first', time.time())
             S.stations[freq] = st
+        elif line.startswith('[from@wh:SCANREJ]'):        # locks the firmware did not report (ota24)
+            k = (kv.get('rx'), kv.get('freq'), kv.get('srate'), kv.get('why'))
+            S.rejects[k] = S.rejects.get(k, 0) + 1
         elif line.startswith('[from@wh:SCANPASS]'):
             rx, now = int(kv.get('rx', 0)), time.time()
             S.passes[rx] = {'time': int(kv.get('time', 0)), 'found': int(kv.get('found', 0)),
@@ -265,9 +271,15 @@ async def _stop_ffmpeg():
 
 async def supervisor():
     """Resend commands, restart ffmpeg if it died, stop viewing when nobody watches."""
-    last_send = 0.0
+    last_send = last_rej = 0.0
     while True:
         now = time.time()
+        if now - last_rej >= 60:
+            if S.rejects:
+                print('scan rejects (rx, freq, srate, why): ' + ', '.join(
+                    f'{"/".join(k)} x{n}' for k, n in sorted(S.rejects.items())), flush=True)
+                S.rejects.clear()
+            last_rej = now
         for cid, t in list(S.viewers.items()):
             if now - t > VIEWER_TTL_S:
                 del S.viewers[cid]
@@ -285,7 +297,11 @@ async def supervisor():
             last_send = now
         if S.viewing and not FFMPEG_LOCK.locked() and (S.ffmpeg is None or S.ffmpeg.returncode is not None):
             await start_ffmpeg()                         # no TS for 20 s or a decoder error
-        if now - last_send > RESEND_S:
+        # a scanning receiver that sent no pass for a while lost its command (the tuner rebooted, or
+        # someone else tuned it): resend now rather than at the next RESEND_S
+        scanning = (2,) if S.viewing else (1, 2)
+        silent = any(now - (S.passes[rx] or {}).get('at', 0) > SCAN_SILENT_S for rx in scanning)
+        if now - last_send > RESEND_S or (silent and now - last_send > SCAN_SILENT_S):
             apply_mode()
             last_send = now
         await asyncio.sleep(2)
