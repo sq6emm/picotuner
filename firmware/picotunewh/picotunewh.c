@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota25"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota26"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -4104,7 +4104,7 @@ volatile	uint32			thenms ;
 // =======================================================================================================
 
 #define	SCANMAXF			48
-#define	SCANMAXSR			4
+#define	SCANMAXSR			5						// the web app's viewing plan has 5 (0v3e-ota26)
 #define	SCANPOLLMS			40						// demodulator state check interval
 #define	SCANSCREENMS		25						// after a retune, before AGC2 is read
 #define	SCANCARRIER			80						// % of the noise reference: below it, a carrier
@@ -4376,7 +4376,7 @@ static void scan_parse (char *command, int32 *freqx, int32 *srx)
 // and keep the timings sane (0v3e-ota17: they went straight to the tuner; a negative SCANMS= became a
 // huge unsigned wait and the scan stood still)
 
-static void scan_validate (int rx, scan_t *s)
+static void scan_validate (scan_t *s, int32 loc)
 {
 	int		fi ;
 	int		si ;
@@ -4393,7 +4393,7 @@ static void scan_validate (int rx, scan_t *s)
 	}
 	for (fi = 0 ; fi < s->nf ; fi++)
 	{
-		d = s->f [fi] - (int32) rcv[rx].requestedloc ;
+		d = s->f [fi] - loc ;
 		if (d < 0)
 		{
 			d = -d ;
@@ -4422,6 +4422,37 @@ static void scan_validate (int rx, scan_t *s)
 }
 
 
+// the command repeats the plan rx is scanning with the same LO, input and gain settings (the web app
+// resends it hourly and when passes stop): the handler then leaves the receiver alone. Until ota25 the
+// tuner was retuned to the plan's first frequency first and the running scan went on from where it was,
+// so its next screen reading or lock belonged to that frequency and not to the candidate (0v3e-ota26)
+
+static int scan_same_plan (int rx, int32 locx, int32 antx)
+{
+	scan_t	*s = &scans [rx] ;
+
+	if (!s->active || !rcv[rx].active || scanpending.nf == 0 || scanpending.nsr == 0)
+	{
+		return 0 ;
+	}
+	if (locx != (int32) rcv[rx].requestedloc || antx != (int32) rcv[rx].antenna)
+	{
+		return 0 ;
+	}
+	if (agcpending != agcms [rx] || agcholdpending != (agchold [rx] == HOLD_OFF ? 0 : agcholdmode [rx]))
+	{
+		return 0 ;
+	}
+	scan_validate (&scanpending, locx) ;							// as it was stored
+	return
+		scanpending.nf == s->nf && scanpending.nsr == s->nsr &&
+		scanpending.waitms == s->waitms && scanpending.screenwait == s->screenwait &&
+		memcmp (scanpending.f, s->f, scanpending.nf * sizeof (int32)) == 0 &&
+		memcmp (scanpending.sr, s->sr, scanpending.nsr * sizeof (int32)) == 0 &&
+		memcmp (scanpending.srmask, s->srmask, scanpending.nf) == 0 ;
+}
+
+
 // after a command for rx was processed: start a scan, or stop one
 
 static void scan_command_done (int rx, int good, int32 freqx)
@@ -4446,22 +4477,8 @@ static void scan_command_done (int rx, int good, int32 freqx)
 	}
 	if (good && freqx != 0)
 	{
-		scan_validate (rx, &scanpending) ;
+		scan_validate (&scanpending, (int32) rcv[rx].requestedloc) ;
 	}
-	if
-	(
-		good && freqx != 0 && scans [rx].active &&
-		scanpending.nf == scans [rx].nf && scanpending.nsr == scans [rx].nsr &&
-		scanpending.waitms == scans [rx].waitms && scanpending.screenwait == scans [rx].screenwait &&
-		memcmp (scanpending.f, scans [rx].f, scanpending.nf * sizeof (int32)) == 0 &&
-		memcmp (scanpending.sr, scans [rx].sr, scanpending.nsr * sizeof (int32)) == 0 &&
-		memcmp (scanpending.srmask, scans [rx].srmask, scanpending.nf) == 0
-	)
-	{
-		return ;														// the same plan again (the web app resends it
-	}																	// every few minutes): keep the running scan
-																		// and what it learnt; a restart began with an
-																		// empty screen and forgot the names (0v3e-ota25)
 	if (good && freqx != 0 && scanpending.nf && scanpending.nsr)
 	{
 		int		fi ;
@@ -5169,6 +5186,7 @@ void core1_main()
 
 	int32			status ;
 	int32			goodx ;
+	int32			samex ;				// the running scan's plan again (0v3e-ota26)
 	int32			headerx ;
 	int32			rxx ;
 	int32           freqx ;
@@ -5238,6 +5256,7 @@ void core1_main()
 		{      
 			ota_trace (1, 0x05) ;
 			goodx   		=  0  ;
+			samex   		=  0  ;
 			headerx 		= -1 ;
 			rxx   			= -1 ;
             freqx 			= -1 ;
@@ -5645,7 +5664,19 @@ void core1_main()
 			{			
 				if (((abs(freqx - locx) >= MINFREQ) && (abs(freqx - locx) <= MAXFREQ)) || freqx == 0)
 				{
-					if ((srx >= MINSR) && (srx <= MAXSR) && rcv[rx].receiver)
+					if
+					(
+						(srx >= MINSR) && (srx <= MAXSR) && rcv[rx].receiver && scan_same_plan (rx, locx, antx) &&
+						(!vgxpresent || voltx <= 0 || (vgxen_ == vgxen && vgxsel_ == vgxsel && vgxtone_ == vgxtone)) &&
+						(!vgypresent || volty <= 0 || (vgyen_ == vgyen && vgysel_ == vgysel && vgytone_ == vgytone))
+					)
+					{
+						goodx = 1 ;						// the same plan again: the scan, the tuner and
+						samex = 1 ;						// the receiver's status stay as they are (0v3e-ota26)
+						rcv[rx].fromaddress32 	= turp->address32 ;
+						rcv[rx].fromport 		= turp->port ;
+					}
+					else if ((srx >= MINSR) && (srx <= MAXSR) && rcv[rx].receiver)
 					{
                      	goodx = 1 ;						// good command
 						rcv[rx].active  = 1 ;
@@ -5811,7 +5842,10 @@ void core1_main()
 
 ///				if (rxx > 0)											// don't reply to scan info
 				{
-					scan_command_done (rx, goodx, freqx) ;					// start or stop a band scan
+					if (!samex)
+					{
+						scan_command_done (rx, goodx, freqx) ;				// start or stop a band scan
+					}
 					if (goodx)  
 					{
    	    	    		sprintf (commandreplybuff,"[from@wh:GOOD] \"%s\"\r\n",commandrxbuff3) ;

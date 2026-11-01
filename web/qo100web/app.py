@@ -34,9 +34,11 @@ HLS_DIR = Path(os.environ.get('HLS_DIR', '/hls'))
 CHANGE_GAP_S = int(os.environ.get('CHANGE_GAP_S', '15'))
 STATIC = Path(__file__).parent / 'static'
 
-RESEND_S = 3600           # resending restarts the scans (until 0v3e-ota25 kept the same plan running) and a lost
-                          # command is caught by SCAN_SILENT_S; the 15 min off-net timeout does not apply on the LAN
-SCAN_SILENT_S = 15        # no pass from a scanning receiver for this long: resend its command
+RESEND_S = 3600           # scan commands are resent this often anyway (0v3e-ota26 leaves a running scan with the
+                          # same plan untouched); a lost command is caught sooner by SCAN_SILENT_S, a lost view
+                          # command by ffmpeg seeing no TS; the 15 min off-net timeout does not apply on the LAN
+SCAN_SILENT_S = 45        # no scan line at all from a scanning receiver for this long: resend its command
+                          # (a pass that collects names can take over 15 s, but it reports as it goes)
 STATION_TTL_S = 30        # a station not reported for this long is dropped from the list
 VIEWER_TTL_S = 12         # a page that stopped polling is no longer a viewer
 
@@ -57,6 +59,8 @@ class State:
         self.viewers = {}          # client id -> last poll time
         self.last_viewer = 0.0
         self.passes = {1: None, 2: None}
+        self.heard = {1: 0.0, 2: 0.0}   # last SCAN / SCANREJ / SCANPASS line per receiver
+        self.resent = {}                # when a silent receiver's scan command was last resent
         self.mode = None
         self.ffmpeg = None
         self.last_change = 0.0
@@ -80,16 +84,22 @@ def view_cmd(freq, srate):
     send(f'[to@wh] rcv=1 freq={freq} offset={OFFSET} srate={srate} fplug=A vgx={VGX}')
 
 
+def scan_plan(rx):
+    """The plan rx scans in the current mode (None: rx is viewing)."""
+    if S.viewing:
+        return PLAN_ONE if rx == 2 else None
+    return PLAN_TWO[rx]
+
+
 def apply_mode():
     """(Re)send the tuner commands for the current mode."""
     if S.viewing:
         view_cmd(S.viewing['freq'], S.viewing['srate'])
-        scan_cmd(2, PLAN_ONE)
-        S.mode = 'view'
-    else:
-        scan_cmd(1, PLAN_TWO[1])
-        scan_cmd(2, PLAN_TWO[2])
-        S.mode = 'scan'
+    for rx in (1, 2):
+        if scan_plan(rx):
+            scan_cmd(rx, scan_plan(rx))
+            S.resent[rx] = time.time()                   # the silence check counts from here
+    S.mode = 'view' if S.viewing else 'scan'
 
 
 # ---------------------------------------------------------------------------------------------
@@ -114,6 +124,8 @@ class ScanProtocol(asyncio.DatagramProtocol):
 
     def line(self, line):
         kv = {p.split('=', 1)[0]: p.split('=', 1)[1] for p in line.split() if '=' in p}
+        if line.startswith(('[from@wh:SCAN]', '[from@wh:SCANREJ]', '[from@wh:SCANPASS]')) and kv.get('rx') in ('1', '2'):
+            S.heard[int(kv['rx'])] = time.time()
         if line.startswith('[from@wh:SCAN]'):
             freq = int(kv.get('freq', 0))
             st = S.stations.get(freq, {})
@@ -304,14 +316,19 @@ async def supervisor():
             apply_mode()
             last_send = now
         if S.viewing and not FFMPEG_LOCK.locked() and (S.ffmpeg is None or S.ffmpeg.returncode is not None):
-            await start_ffmpeg()                         # no TS for 20 s or a decoder error
-        # a scanning receiver that sent no pass for a while lost its command (the tuner rebooted, or
-        # someone else tuned it): resend now rather than at the next RESEND_S
-        scanning = (2,) if S.viewing else (1, 2)
-        silent = any(now - (S.passes[rx] or {}).get('at', 0) > SCAN_SILENT_S for rx in scanning)
-        if now - last_send > RESEND_S or (silent and now - last_send > SCAN_SILENT_S):
-            apply_mode()
+            if S.ffmpeg is not None:                     # no TS for 20 s or a decoder error: RX1 may have
+                view_cmd(S.viewing['freq'], S.viewing['srate'])   # lost its command (a tuner reboot)
+            await start_ffmpeg()
+        # a scanning receiver that sent nothing for a while lost its command (the tuner rebooted, or
+        # someone else tuned it): resend its command alone (resending RX1's view command would retune
+        # the stream being watched)
+        hourly = now - last_send > RESEND_S
+        if hourly:
             last_send = now
+        for rx in (1, 2):
+            if scan_plan(rx) and (hourly or now - max(S.heard[rx], S.resent.get(rx, 0)) > SCAN_SILENT_S):
+                scan_cmd(rx, scan_plan(rx))
+                S.resent[rx] = now
         await asyncio.sleep(2)
 
 

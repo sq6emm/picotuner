@@ -165,6 +165,20 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
     once two screens in a row show it, unless something locked there last pass; lock timeouts come
     as `SCANREJ ... why=timeout` (msr= then gives the misses in a row). RX1 passes went from 4-9 s
     to 1.6-3.4 s; against the BATC monitor the list kept 99-100 % of the decodable stations.
+21. **A repeated plan leaves the receiver alone (0v3e-ota26)**, from a code review:
+    - ota25 kept the running scan when the same plan came again, but the command handler had already
+      retuned the tuner to the plan's first frequency (the beacon) and reset the receiver's status. The
+      scan then went on with the candidate it was at, so its next screen reading or lock belonged to the
+      beacon (a phantom station at the candidate's frequency), and RX1's beacon calibration was zeroed.
+      The handler now checks for the same plan, LO offset, input, AGC settings and LNB voltages first and
+      then changes nothing; the reply is still `GOOD`.
+    - `SCANMAXSR` 4 → 5: the web app's viewing plan has five symbol rates and 250 kS/s was silently dropped.
+    - Checked on the tuner: the RX1 plan resent every 1.5 s for 2 min gave no new stations and no restart
+      (passes kept their length), and RX2 with the viewing plan tried 250 kS/s.
+    - Web app: a receiver counts as silent after 45 s without any scan line (was: 15 s without a finished
+      pass; in viewing mode RX2's passes take 7-18 s, so the old check fired often and resent RX1's view
+      command, which retuned the stream being watched). Only the silent receiver's scan command is
+      resent; RX1's view command is resent only when ffmpeg sees no TS.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):
