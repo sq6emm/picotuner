@@ -32,18 +32,19 @@ def poller():                                 # 'p' on a persistent connection; 
             print('poll', x, flush=True); time.sleep(1)
             try: ps = socket.create_connection(('192.168.253.123', 4533), timeout=5)
             except OSError: pass
+class Stuck(Exception): pass
 def goto(az, el, tol=0.5):                   # the rotator can stop ~0.35 deg short in el
     cmd(f'P {az:.2f} {el:.2f}'); t0 = tl = time.time()
     while time.time() - t0 < 400:
         time.sleep(0.5)
+        if time.time() - cur[0] > 3: raise Stuck(f'no rotator position for {time.time() - cur[0]:.0f} s')
         if abs(cur[1] - az) <= tol and abs(cur[2] - el) <= tol: return
         if time.time() - tl > 5 and (abs(cur[1] - az) > tol or abs(cur[2] - el) > tol): cmd(f'P {az:.2f} {el:.2f}'); tl = time.time()
-    print('goto timeout', az, el, cur, flush=True)
+    raise Stuck(f'goto {az} {el}: not reached in 400 s, at {cur[1:]}')
 r = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); r.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); r.bind(('', 9906))
 c = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 fh = open(sys.argv[1], 'w', newline=''); w = csv.writer(fh)
 w.writerow(['t', 'row', 'az', 'el', 'agc2', 'pi', 'hold'])
-class Stuck(Exception): pass
 def log(row, until, kick=None, limit=300):     # kick: resent every 5 s (a command after a direction change can be ignored)
     while select.select([r], [], [], 0)[0]: r.recv(4096)
     tk = t0 = time.time()
@@ -79,4 +80,7 @@ except Stuck as x:                             # stop the rotator; the rows logg
 finally:
     fh.flush()
     c.sendto(b'[to@wh] rcv=2 freq=0 offset=9750000 srate=1500 fplug=A', ('192.168.253.193', 9920))
-goto(169.29, 30.38); print('back at', cur, flush=True)
+try:
+    goto(169.29, 30.38); print('back at', cur, flush=True)
+except Stuck as x:
+    print('ABORT', x, flush=True); cmd('S')

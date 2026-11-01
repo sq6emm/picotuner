@@ -179,6 +179,11 @@ G4EWJ's 0v3e source (GPL v3, BATC wiki `Ptwh0v3e-source.zip`) in `firmware/picot
       pass; in viewing mode RX2's passes take 7-18 s, so the old check fired often and resent RX1's view
       command, which retuned the stream being watched). Only the silent receiver's scan command is
       resent; RX1's view command is resent only when ffmpeg sees no TS.
+22. **Scan reports bounded by the mailbox (0v3e-ota27)**, from the follow-up review: with five symbol
+    rates the largest plan (48 frequencies) could format a `SCANPASS` line of up to 1518 bytes into the
+    1316-byte Core1 → Core0 mailbox. The AGC2 list now ends with `...` before it would not fit, and
+    `scan_send()` never copies more than the mailbox holds. On the tuner the largest plan's report with
+    real readings is ~1016 bytes and complete; RX1 kept scanning meanwhile.
 
 ## Build
 On `power`, in Docker (Ubuntu 20.04's apt GCC 9.2, like G4EWJ's `apt install gcc-arm-none-eabi`):

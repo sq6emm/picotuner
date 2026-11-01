@@ -70,7 +70,7 @@
 */
 		
 #define VERSIONX	"0v3" 		// main version ID
-#define VERSIONX2	"e-ota26"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
+#define VERSIONX2	"e-ota27"	// sub version ID: 0v3e + DHCP option 54, signal and demodulator status, update over Ethernet, band scan, watchdog
 
 #define CR		13
 #define LF		10
@@ -4508,9 +4508,16 @@ static void scan_command_done (int rx, int good, int32 freqx)
 
 static void scan_send (int rx, char *text)
 {
+	size_t	n = strlen (text) ;
+
 	while (xsr10.status == 1) ;										// wait for core 0 to deal with the last request
-	strcpy ((char*) xsr10.buffer, text) ;
-	xsr10.length 	= strlen (text) + 1 ;
+	if (n > sizeof (xsr10.buffer) - 1)
+	{
+		n = sizeof (xsr10.buffer) - 1 ;								// never past the mailbox (0v3e-ota27)
+	}
+	memcpy ((char*) xsr10.buffer, text, n) ;
+	xsr10.buffer [n] = 0 ;
+	xsr10.length 	= n + 1 ;
 	xsr10.port 		= baseipport + PORTSCAN ;
 	xsr10.typex 	= GENINFOREC ;
 	xsr10.receiver	= rx ;
@@ -4587,6 +4594,11 @@ static	char	temps [128 + SCANMAXF * SCANMAXSR * 6] ;		// static: Core1 stack is 
 	strcpy (temps + strlen (temps) - 2, " agc2=") ;					// screen readings, frequency by frequency,
 	for (fi = 0 ; fi < s->nf ; fi++)									// '/' between symbol rates, '-' not tried
 	{
+		if (strlen (temps) + SCANMAXSR * 6 + 6 > sizeof (xsr10.buffer))	// a big plan with 5 SRs no longer fits
+		{																// the mailbox: end the list with ...
+			strcat (temps, "...\r\n") ;									// (0v3e-ota27)
+			break ;
+		}
 		for (si = 0 ; si < s->nsr ; si++)
 		{
 			if (s->srmask [fi] & (1 << si))
